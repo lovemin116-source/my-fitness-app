@@ -459,13 +459,19 @@ const StrengthAnalysisView = ({ data, onManage }: any) => {
   );
 };
 
+// --- 請替換最底部的 BodyGoalPro 主程式 ---
+
 const BodyGoalPro = () => {
   const [loading, setLoading] = useState(true); const [user, setUser] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'body' | 'log' | 'analysis' | 'strength_analysis'>('log');
+  
+  // 🔽 修改這裡：將預設值 'log' 改為 'body'
+  const [activeTab, setActiveTab] = useState<'body' | 'log' | 'analysis' | 'strength_analysis'>('body');
+  
   const [userData, setUserData] = useState<any>(DEFAULT_DATA);
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false); const [isImportOpen, setIsImportOpen] = useState(false);
   const [manageExId, setManageExId] = useState<string | null>(null);
+
   useEffect(() => { signInAnonymously(auth).then(() => onAuthStateChanged(auth, (u) => { if(u) setUser(u); setLoading(false); })); }, []);
   useEffect(() => {
     if (loading || !user) return; setIsDataLoading(true);
@@ -475,19 +481,30 @@ const BodyGoalPro = () => {
       } else { setUserData(DEFAULT_DATA); }
     }); return () => unsub();
   }, [loading, user]);
+
   const update = async (newData: any) => { setUserData(newData); try { await setDoc(doc(db, 'my_data', FIXED_DOC), JSON.parse(JSON.stringify(newData))); } catch(e) { console.error(e); } };
+
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-400 font-black"><Loader2 className="animate-spin mr-2"/> SYNCING...</div>;
+
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
       <DataTransferModal isOpen={isExportOpen} type="export" data={userData} onClose={()=>setIsExportOpen(false)} />
       <DataTransferModal isOpen={isImportOpen} type="import" onImport={update} onClose={()=>setIsImportOpen(false)} />
       <HistoryManagementModal isOpen={!!manageExId} targetId={manageExId} onClose={()=>setManageExId(null)} data={userData} onUpdate={update} />
+      
       <header className="bg-white p-4 sticky top-0 z-50 shadow-sm border-b flex items-center justify-between">
         <div className="flex items-center gap-3"><div className={`p-2 rounded-2xl bg-indigo-600 text-white shadow-lg`}><Activity size={20}/></div>
           <div><h1 className="text-lg font-black tracking-tighter text-slate-800 uppercase">BODYGOAL PRO</h1><p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">Fitness Cloud</p></div></div>
         <div className="flex gap-1"><button onClick={()=>setIsExportOpen(true)} className="p-2 text-indigo-600"><Upload size={18}/></button><button onClick={()=>setIsImportOpen(true)} className="p-2 text-emerald-600"><Cloud size={18}/></button><button onClick={()=>{if(confirm("重設？")) update(DEFAULT_DATA);}} className="p-2 text-red-400"><RefreshCw size={18}/></button></div>
       </header>
-      <main className="p-4">{activeTab === 'body' && <BodyMetricsView data={userData} onUpdate={update} />}{activeTab === 'log' && <StrengthLogView data={userData} onUpdate={update} />}{activeTab === 'analysis' && <BodyAnalysisView data={userData} />}{activeTab === 'strength_analysis' && <StrengthAnalysisView data={userData} onManage={setManageExId} />}</main>
+
+      <main className="p-4">
+        {activeTab === 'body' && <BodyMetricsView data={userData} onUpdate={update} />}
+        {activeTab === 'log' && <StrengthLogView data={userData} onUpdate={update} />}
+        {activeTab === 'analysis' && <BodyAnalysisView data={userData} />}
+        {activeTab === 'strength_analysis' && <StrengthAnalysisView data={userData} onManage={setManageExId} />}
+      </main>
+
       <nav className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-xl border-t pb-safe z-50 flex justify-around shadow-2xl">
         <button onClick={()=>setActiveTab('body')} className={`flex-1 py-4 flex flex-col items-center text-[10px] font-black ${activeTab==='body'?'text-teal-600 scale-110':'text-slate-400'}`}><Ruler size={22} strokeWidth={3}/><span className="mt-1">體態紀錄</span></button>
         <button onClick={()=>setActiveTab('analysis')} className={`flex-1 py-4 flex flex-col items-center text-[10px] font-black ${activeTab==='analysis'?'text-orange-500 scale-110':'text-slate-400'}`}><ImageIcon size={22} strokeWidth={3}/><span className="mt-1">體態分析</span></button>
@@ -497,4 +514,5 @@ const BodyGoalPro = () => {
     </div>
   );
 };
+
 export default BodyGoalPro;
