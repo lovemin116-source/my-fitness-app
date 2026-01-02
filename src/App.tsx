@@ -161,8 +161,8 @@ const ExerciseLibraryModal = ({ isOpen, onClose, data, onUpdate }: any) => {
   return (
     <div className="fixed inset-0 bg-black/70 z-[9999] flex items-center justify-center p-4 backdrop-blur-md">
       <div className="bg-white rounded-[2.5rem] w-full max-w-lg p-6 shadow-2xl flex flex-col max-h-[85vh]">
-        <div className="flex justify-between items-center mb-6"><h3 className="font-black text-xl flex items-center gap-2"><BookOpen className="text-indigo-600"/> 動作庫</h3><button onClick={onClose}><X size={20}/></button></div>
-        <div className="flex gap-2 overflow-x-auto pb-2 mb-2 no-scrollbar">{['胸', '背', '肩', '腿'].map(m => (<button key={m} onClick={() => setFilterMuscle(m)} className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${filterMuscle === m ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'}`}>{m}</button>))}</div>
+        <div className="flex justify-between items-center mb-6"><h3 className="font-black text-xl flex items-center gap-2"><BookOpen className="text-indigo-600"/> 動作庫</h3><button onClick={onClose} className="p-2 bg-slate-100 rounded-full text-slate-400"><X size={20}/></button></div>
+        <div className="flex gap-2 overflow-x-auto pb-2 mb-2 no-scrollbar">{['胸', '背', '肩', '腿', '手', '腹'].map(m => (<button key={m} onClick={() => setFilterMuscle(m)} className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${filterMuscle === m ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-100 text-slate-400'}`}>{m}</button>))}</div>
         <div className="flex-1 overflow-y-auto space-y-3 pr-1">
           {data.exercises.filter((e: any) => e.muscle === filterMuscle).map((ex: any) => (
             <div key={ex.id} className={`p-4 rounded-2xl border ${ex.isTracked !== false ? 'bg-white' : 'bg-slate-50 opacity-60'}`}>
@@ -184,12 +184,12 @@ const TrainingRow = ({ log, index, onUpdate, onDelete, onDuplicate, onComplete }
   return (
     <div className="group space-y-1 mb-2">
       <SwipeableRow onComplete={onComplete} isCompleted={log.isCompleted}>
-        <div className={`flex items-center gap-2 p-2 rounded-lg border-2 ${log.isCompleted ? 'border-emerald-500 bg-emerald-900/20' : 'border-transparent bg-slate-700/40'}`}>
+        <div className={`flex items-center gap-2 p-2 rounded-lg border-2 transition-all ${log.isCompleted ? 'border-emerald-500 bg-emerald-900/20' : 'border-transparent bg-slate-700/40'}`}>
           <span className="font-mono text-[10px] w-4 text-center text-slate-500">{log.isCompleted ? '✓' : index+1}</span>
           <input type="number" value={w} onChange={e=>setW(e.target.value)} onBlur={()=>save()} className={`w-full bg-slate-900 border-none rounded p-1 text-center text-sm ${log.isCompleted ? 'text-emerald-300 font-bold' : 'text-white'}`} />
-          <button onClick={()=>{const nu=log.originalUnit==='kg'?'lbs':'kg'; save(nu);}} className="text-[10px] bg-slate-800 px-2 py-1 rounded text-slate-400 font-bold">{log.originalUnit.toUpperCase()}</button>
+          <button onClick={()=>{const nu=log.originalUnit==='kg'?'lbs':'kg'; save(nu);}} className="text-[10px] bg-slate-800 px-2 py-1 rounded border border-slate-600 text-slate-400 font-bold">{log.originalUnit.toUpperCase()}</button>
           <input type="number" value={r} onChange={e=>setR(e.target.value)} onBlur={()=>save()} className={`w-full bg-slate-900 border-none rounded p-1 text-center text-sm ${log.isCompleted ? 'text-emerald-300 font-bold' : 'text-white'}`} />
-          <div className="flex gap-1" onTouchStart={e=>e.stopPropagation()}><button onClick={onDuplicate} className="p-1 text-slate-400"><Copy size={14}/></button><button onClick={()=>{if(isDeleting) onDelete(); else {setIsDeleting(true); setTimeout(()=>setIsDeleting(false), 2000);}}} className={`p-1 ${isDeleting?'text-red-500':'text-slate-400'}`}><Trash2 size={14}/></button></div>
+          <div className="flex gap-1" onTouchStart={e=>e.stopPropagation()}><button onClick={onDuplicate} className="p-1 text-slate-400"><Copy size={14}/></button><button onClick={()=>{if(isDeleting) onDelete(); else {setIsDeleting(true); setTimeout(()=>setIsDeleting(false), 2000);}}} className={`p-1 ${isDeleting?'text-red-500 animate-pulse':'text-slate-400'}`}><Trash2 size={14}/></button></div>
         </div>
       </SwipeableRow>
     </div>
@@ -231,7 +231,7 @@ const BodyMetricsView = ({ data, onUpdate }: any) => {
           <button onClick={()=>{if(!weight)return; onUpdate({...data, entries:[...data.entries.filter((e:any)=>e.date!==date), {id:Date.now().toString(),date,weight:parseFloat(weight),bodyFat:bodyFat?parseFloat(bodyFat):undefined,photo}]}); setWeight(''); setBodyFat(''); setPhoto(undefined);}} className="bg-[#1a9478] text-white px-8 py-2.5 rounded-xl font-black shadow-lg">儲存</button>
         </div>
       </div>
-      <div className="bg-white p-6 rounded-[1.5rem] border h-[250px] shadow-sm">
+      <div className="bg-white p-6 rounded-[1.5rem] border h-[250px] shadow-sm relative">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartData} margin={{top:50,right:10,left:-20,bottom:0}}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/><XAxis dataKey="date" tickFormatter={s=>s.slice(5)} fontSize={10}/><YAxis domain={['auto','auto']} fontSize={10}/><Tooltip/>
@@ -269,16 +269,22 @@ const BodyAnalysisView = ({ data }: any) => {
 
 const StrengthLogView = ({ data, onUpdate }: any) => {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [isCopy, setIsCopy] = useState(false); const [isLib, setIsLib] = useState(false); const [isTimerOpen, setIsTimerOpen] = useState(false);
+  const [isCopy, setIsCopy] = useState(false); const [isAddEx, setIsAddEx] = useState(false); const [isLib, setIsLib] = useState(false); const [isTimerOpen, setIsTimerOpen] = useState(false);
   const [muscle, setMuscle] = useState<any>('胸'); const [exId, setExId] = useState('');
+  
+  // 修改：newEx 加入 muscle 欄位
+  const [newEx, setNewEx] = useState({ name: '', tool: '槓鈴', unit: 'kg', muscle: '胸' });
+  
   const currentPlan = data.dailyPlans?.[date] || '';
   const todaysLogs = data.logs.filter((l:any)=>l.date===date);
   const todaysEx = useMemo(()=>Array.from(new Set(todaysLogs.map((l:any)=>l.exerciseId))).map(id=>data.exercises.find((e:any)=>e.id===id)).filter(Boolean), [todaysLogs, data.exercises]);
+  
   const handleRowComplete = (logId: string) => {
     const updated = data.logs.map((l:any) => l.id === logId ? { ...l, isCompleted: !l.isCompleted } : l);
     onUpdate({ ...data, logs: updated });
     if (updated.find((l:any)=>l.id===logId)?.isCompleted) setIsTimerOpen(true);
   };
+
   return (
     <div className="space-y-6 pb-20">
       <CopyWorkoutModal isOpen={isCopy} onClose={()=>setIsCopy(false)} data={data} onCopy={(sd:string)=>{const sp=data.dailyPlans[sd]; const nl=data.logs.filter((l:any)=>l.date===sd).map((l:any)=>({...l, id:Math.random().toString(36).substr(2,9), date, isCompleted: false})); onUpdate({...data, dailyPlans:{...data.dailyPlans, [date]:sp}, logs:[...data.logs.filter((l:any)=>l.date!==date), ...nl]});}} />
@@ -293,7 +299,7 @@ const StrengthLogView = ({ data, onUpdate }: any) => {
         </div>
       ) : (
         <div className="bg-slate-800 p-4 rounded-[2.5rem] shadow-xl text-white space-y-6 min-h-[400px]">
-          <h3 className="font-black text-indigo-300 text-sm flex items-center gap-2"><Activity size={16}/> {currentPlan}</h3>
+          <h3 className="font-black text-indigo-300 text-sm flex items-center gap-2 uppercase tracking-widest"><Activity size={16}/> {currentPlan}</h3>
           {todaysEx.map((ex:any)=>(
             <div key={ex.id} className="bg-slate-700/50 p-4 rounded-3xl border border-slate-600">
               <div className="flex justify-between mb-4 font-black"><h4>{ex.name}</h4><span className="text-[10px] bg-slate-600 px-2 rounded text-slate-300">{ex.type}</span></div>
@@ -303,10 +309,44 @@ const StrengthLogView = ({ data, onUpdate }: any) => {
               <button onClick={()=>onUpdate({...data, logs:[...data.logs, {id:Math.random().toString(), exerciseId:ex.id, date, weight:0, reps:8, originalWeight:0, originalUnit:'kg', isCompleted:false}]})} className="w-full mt-2 py-2 border border-dashed border-slate-600 rounded-xl text-slate-400 text-xs font-black">+ 加一組</button>
             </div>
           ))}
-          <div className="pt-6 border-t border-slate-700 flex gap-2">
-            <select value={exId} onChange={e=>setExId(e.target.value)} className="flex-1 bg-slate-900 border border-slate-600 rounded-2xl p-3 text-sm text-white outline-none"><option value="">-- 選擇動作 --</option>{data.exercises.filter((e:any)=>e.muscle===muscle && e.isTracked!==false).map((e:any)=><option key={e.id} value={e.id}>{e.name}</option>)}</select>
-            <button onClick={()=>setIsLib(true)} className="bg-slate-700 text-slate-300 px-3 rounded-2xl"><BookOpen size={20}/></button>
-            <button onClick={()=>{if(!exId)return; onUpdate({...data, logs:[...data.logs, {id:Math.random().toString(), exerciseId:exId, date, weight:0, reps:8, originalWeight:0, originalUnit:'kg', isCompleted:false}]});}} className="bg-indigo-600 text-white px-5 rounded-2xl active:scale-90"><Plus/></button>
+          
+          <div className="pt-6 border-t border-slate-700 space-y-4">
+            <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+              {['胸','背','肩','腿','手','腹'].map(m=>(<button key={m} onClick={()=>setMuscle(m)} className={`px-4 py-1.5 rounded-xl text-xs font-black transition-all ${muscle===m?'bg-indigo-500 text-white shadow-lg':'bg-slate-700 text-slate-400'}`}>{m}</button>))}
+            </div>
+            <div className="flex gap-2">
+              <select value={exId} onChange={e=>{ if(e.target.value==='new'){setIsAddEx(true); setNewEx({...newEx, muscle: muscle});} else setExId(e.target.value); }} className="flex-1 bg-slate-900 border border-slate-600 rounded-2xl p-3 text-sm text-white outline-none">
+                <option value="">-- 選擇動作 ({muscle}) --</option>
+                {data.exercises.filter((e:any)=>e.muscle===muscle && e.isTracked!==false).map((e:any)=><option key={e.id} value={e.id}>{e.name}</option>)}
+                <option value="new">+ 建立新動作</option>
+              </select>
+              <button onClick={()=>setIsLib(true)} className="bg-slate-700 text-slate-300 px-3 rounded-2xl"><BookOpen size={20}/></button>
+              <button onClick={()=>{if(!exId)return; onUpdate({...data, logs:[...data.logs, {id:Math.random().toString(), exerciseId:exId, date, weight:0, reps:8, originalWeight:0, originalUnit:'kg', isCompleted:false}]}); setExId('');}} className="bg-indigo-600 text-white px-5 rounded-2xl active:scale-90"><Plus/></button>
+            </div>
+            
+            {/* --- 優化後的建立動作表單：加入部位選擇 --- */}
+            {isAddEx && (
+              <div className="bg-slate-900 p-5 rounded-3xl border border-slate-600 space-y-4 shadow-2xl">
+                <div className="flex justify-between font-black text-indigo-300"><span>建立新動作</span><button onClick={()=>setIsAddEx(false)}><X/></button></div>
+                
+                {/* 部位選擇器 */}
+                <div className="flex flex-col gap-2">
+                  <span className="text-[10px] text-slate-500 font-bold ml-1">選擇肌群分類</span>
+                  <select value={newEx.muscle} onChange={e=>setNewEx({...newEx, muscle: e.target.value})} className="w-full bg-slate-800 border-none rounded-xl p-3 text-sm text-white outline-none">
+                    {['胸','背','肩','腿','手','腹'].map(m=><option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
+
+                <input placeholder="動作名稱" value={newEx.name} onChange={e=>setNewEx({...newEx, name: e.target.value})} className="w-full bg-slate-800 border-none rounded-xl p-3 text-sm text-white outline-none" />
+                
+                <div className="grid grid-cols-2 gap-3">
+                  <select value={newEx.tool} onChange={e=>setNewEx({...newEx, tool: e.target.value})} className="bg-slate-800 text-xs text-white p-2 rounded-lg">{['啞鈴','槓鈴','W槓','繩索','器械','自體重'].map(t=><option key={t} value={t}>{t}</option>)}</select>
+                  <select value={newEx.unit} onChange={e=>setNewEx({...newEx, unit: e.target.value as any})} className="bg-slate-800 text-xs text-white p-2 rounded-lg"><option value="kg">預設: KG</option><option value="lbs">預設: LBS</option></select>
+                </div>
+                
+                <button onClick={()=>{if(!newEx.name)return; const ne:any={id:Date.now().toString(), name:newEx.name, muscle:newEx.muscle, type:newEx.tool, isTracked:true, defaultUnit:newEx.unit}; onUpdate({...data, exercises:[...data.exercises, ne]}); setIsAddEx(false); setExId(ne.id);}} className="w-full bg-indigo-500 text-white py-3 rounded-2xl font-black shadow-lg">建立並選取</button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -329,7 +369,7 @@ const StrengthAnalysisView = ({ data, onManage }: any) => {
     <div className="space-y-6 pb-24">
       <div className="bg-white p-5 rounded-[1.5rem] shadow-sm border flex flex-col gap-4">
         <h3 className="font-black text-slate-700 flex items-center gap-2"><ChartIcon size={18} className="text-teal-600"/> 訓練分析</h3>
-        <select value={muscle} onChange={e=>setMuscle(e.target.value)} className="w-full bg-slate-50 border p-3 rounded-xl font-bold text-sm outline-none"><option value="all">所有部位</option>{['胸','背','肩','腿'].map(m=><option key={m} value={m}>{m}</option>)}</select>
+        <select value={muscle} onChange={e=>setMuscle(e.target.value)} className="w-full bg-slate-50 border p-3 rounded-xl font-bold text-sm outline-none"><option value="all">所有部位</option>{['胸','背','肩','腿','手','腹'].map(m=><option key={m} value={m}>{m}</option>)}</select>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {filteredData.map((ex:any)=>(
