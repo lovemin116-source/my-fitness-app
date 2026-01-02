@@ -51,37 +51,81 @@ const DEFAULT_DATA: any = {
 // --- 3. 輔助元件與彈窗 ---
 
 // 休息計時器 (含音效邏輯)
+// 休息計時器 (手機優化穩定版)
 const RestTimerModal = ({ isOpen, onClose, defaultSeconds = 90 }: any) => {
   const [seconds, setSeconds] = useState(defaultSeconds);
+  // 使用 useRef 保持同一個音訊上下文，避免手機資源耗盡
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  // 初始化並解鎖音訊 (行動裝置必備)
+  const initAudio = () => {
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    // 如果是處於懸掛狀態（手機常態），則嘗試恢復
+    if (audioCtxRef.current.state === 'suspended') {
+      audioCtxRef.current.resume();
+    }
+  };
+
   const playBeep = (freq: number, duration: number) => {
     try {
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.type = 'sine'; osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-      osc.connect(gain); gain.connect(audioCtx.destination);
-      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
-      osc.start(); osc.stop(audioCtx.currentTime + duration);
-    } catch (e) { console.warn(e); }
+      initAudio(); // 每次播放前確認已解鎖
+      const ctx = audioCtxRef.current!;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, ctx.currentTime);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      gain.gain.setValueAtTime(0, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.1, ctx.currentTime + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
+
+      osc.start();
+      osc.stop(ctx.currentTime + duration);
+    } catch (e) {
+      console.warn("音訊播放受阻:", e);
+    }
   };
 
   useEffect(() => {
-    if (!isOpen) { setSeconds(defaultSeconds); return; }
+    if (!isOpen) {
+      setSeconds(defaultSeconds);
+      return;
+    }
+
+    // 視窗開啟時立即嘗試解鎖音訊（此時是由右滑動作觸發，最有機會成功）
+    initAudio();
+
     const t = setInterval(() => {
       setSeconds((s: number) => {
         const next = s - 1;
+
+        // 最後 10 秒嗶聲
         if (next <= 10 && next > 0) playBeep(440, 0.1);
-        if (next === 0) { playBeep(880, 0.5); clearInterval(t); setTimeout(onClose, 1000); return 0; }
+        
+        // 時間到結束音
+        if (next === 0) {
+          playBeep(880, 0.5);
+          clearInterval(t);
+          setTimeout(onClose, 1200);
+          return 0;
+        }
         return next;
       });
     }, 1000);
+
     return () => clearInterval(t);
   }, [isOpen]);
 
   if (!isOpen) return null;
+
   return (
     <div className="fixed inset-0 z-[10000] flex items-end justify-center sm:items-center p-4 pointer-events-none">
+      {/* 增加一個隱形按鈕，萬一自動解鎖失敗，點擊 "+30秒" 或 "下一組" 也能強制解鎖 */}
       <div className="bg-slate-900/95 text-white p-6 w-full max-w-xs rounded-[2.5rem] shadow-2xl pointer-events-auto border border-slate-700 animate-in slide-in-from-bottom">
         <div className="flex justify-between mb-4 font-bold text-indigo-400">
           <div className="flex items-center gap-2">
@@ -90,8 +134,23 @@ const RestTimerModal = ({ isOpen, onClose, defaultSeconds = 90 }: any) => {
           </div>
           <button onClick={onClose}><X/></button>
         </div>
-        <div className={`text-center text-6xl font-black font-mono mb-6 ${seconds <= 10 ? "text-red-500" : ""}`}>{Math.floor(seconds/60)}:{(seconds%60).toString().padStart(2,'0')}</div>
-        <div className="flex gap-2"><button onClick={()=>setSeconds(s=>s+30)} className="flex-1 bg-slate-800 py-3 rounded-2xl text-xs font-bold">+30秒</button><button onClick={onClose} className="flex-1 bg-indigo-600 py-3 rounded-2xl text-xs font-bold">下一組</button></div>
+        <div className={`text-center text-6xl font-black font-mono mb-6 ${seconds <= 10 ? "text-red-500" : ""}`}>
+          {Math.floor(seconds/60)}:{(seconds%60).toString().padStart(2,'0')}
+        </div>
+        <div className="flex gap-2">
+          <button 
+            onClick={() => { initAudio(); setSeconds(s => s + 30); }} 
+            className="flex-1 bg-slate-800 py-3 rounded-2xl text-xs font-bold active:bg-slate-700"
+          >
+            +30秒
+          </button>
+          <button 
+            onClick={() => { initAudio(); onClose(); }} 
+            className="flex-1 bg-indigo-600 py-3 rounded-2xl text-xs font-bold active:bg-indigo-500"
+          >
+            下一組
+          </button>
+        </div>
       </div>
     </div>
   );
