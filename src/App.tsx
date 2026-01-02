@@ -1,22 +1,17 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine 
-} from 'recharts';
-import { 
-  Scale, Target, TrendingDown, Plus, Trash2, Activity, 
-  Dumbbell, ChevronDown, ChevronUp, Ruler, Edit2, Copy, Check, X, 
-  AlertCircle, Database, LogOut, Loader2, RefreshCw, Upload, Download, 
-  FileJson, Calculator, Cloud, Share2, Camera, Image as ImageIcon, Search, Calendar as CalendarIcon, KeyRound, LineChart as ChartIcon
+  Scale, Target, Plus, Trash2, Activity, Dumbbell, Ruler, Edit2, Copy, Check, X, 
+  AlertCircle, Loader2, RefreshCw, Upload, Cloud, Camera, Image as ImageIcon, 
+  Calendar as CalendarIcon, LineChart as ChartIcon, ClipboardList, PlusCircle, 
+  History, ChevronLeft, ChevronRight, BookOpen, Eye, EyeOff, Search, ChevronDown, 
+  Database 
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInAnonymously, 
-  onAuthStateChanged
-} from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 
-// --- 您私人的 Firebase 設定 ---
+// --- 1. Firebase 配置 ---
 const firebaseConfig = {
   apiKey: "AIzaSyAKgPusc2ckogI6S2tkytNKZqpu-TiR8ig",
   authDomain: "roygym2-ce85c.firebaseapp.com",
@@ -25,200 +20,110 @@ const firebaseConfig = {
   messagingSenderId: "476108578502",
   appId: "1:476108578502:web:9d26dd1c1323b3e24081c7"
 };
-
-// 初始化 Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const FIXED_DOC = 'master_sheet';
 
-// 固定參數
-const FIXED_COLLECTION = 'my_data';
-const FIXED_DOC_ID = 'master_sheet'; 
-
-// --- 圖片處理工具 ---
-const compressImage = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target?.result as string;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 800;
-        const MAX_HEIGHT = 800;
-        let width = img.width;
-        let height = img.height;
-
-        if (width > height) {
-          if (width > MAX_WIDTH) {
-            height *= MAX_WIDTH / width;
-            width = MAX_WIDTH;
-          }
-        } else {
-          if (height > MAX_HEIGHT) {
-            width *= MAX_HEIGHT / height;
-            height = MAX_HEIGHT;
-          }
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, width, height);
-        
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
-        resolve(dataUrl);
-      };
-      img.onerror = (error) => reject(error);
+// --- 2. 工具函式與初始資料 ---
+const lbsToKg = (lbs: number) => parseFloat((lbs / 2.20462).toFixed(2));
+const calculate1RM = (w: number, r: number) => (!r || r <= 1) ? w : w * (1 + r / 30);
+const compressImage = (file: File): Promise<string> => new Promise((res) => {
+  const reader = new FileReader(); reader.readAsDataURL(file);
+  reader.onload = (ev) => {
+    const img = new Image(); img.src = ev.target?.result as string;
+    img.onload = () => {
+      const cvs = document.createElement('canvas'); const MAX = 800;
+      let w = img.width, h = img.height;
+      if (w > h) { if (w > MAX) { h *= MAX / w; w = MAX; } } else { if (h > MAX) { w *= MAX / h; h = MAX; } }
+      cvs.width = w; cvs.height = h;
+      cvs.getContext('2d')?.drawImage(img, 0, 0, w, h);
+      res(cvs.toDataURL('image/jpeg', 0.6));
     };
-    reader.onerror = (error) => reject(error);
-  });
+  };
+});
+
+const DEFAULT_DATA: any = { 
+  goals: { targetWeight: 66, targetBodyFat: 14, targetDate: '2026-12-31' }, 
+  entries: [], exercises: [], logs: [], dailyPlans: {}, planTemplates: [] 
 };
 
-// --- 型別定義 ---
-interface BodyEntry {
-  id: string;
-  date: string;
-  weight: number;
-  bodyFat?: number;
-  photo?: string;
-}
-interface Goals {
-  targetWeight: number | string;
-  targetBodyFat: number | string;
-  targetDate: string;
-}
-type MuscleGroup = '胸' | '肩' | '背';
-type EquipmentType = '槓鈴' | '啞鈴' | '自體重';
-type WeightUnit = 'kg' | 'lbs';
-interface Exercise {
-  id: string;
-  name: string;
-  muscle: MuscleGroup;
-  type: EquipmentType;
-}
-interface TrainingLog {
-  id: string;
-  exerciseId: string;
-  date: string;
-  weight: number;
-  reps: number;
-  originalWeight: number;
-  originalUnit: WeightUnit;
-}
-interface UserData {
-  goals: Goals;
-  entries: BodyEntry[];
-  exercises: Exercise[];
-  logs: TrainingLog[];
-}
-const DEFAULT_GOALS: Goals = { targetWeight: 60, targetBodyFat: 20, targetDate: '2025-12-31' };
-const DEFAULT_DATA: UserData = {
-  goals: DEFAULT_GOALS,
-  entries: [],
-  exercises: [],
-  logs: []
-};
+// --- 3. 功能彈窗 ---
 
-// --- 輔助元件 ---
-const ConfirmModal = ({ isOpen, message, onConfirm, onCancel, isDestructive = false }: { isOpen: boolean, message: string, onConfirm: () => void, onCancel: () => void, isDestructive?: boolean }) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-[2px] flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 border border-slate-100">
-        <h3 className="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">
-          <AlertCircle className={isDestructive ? "text-red-500" : "text-slate-600"} size={20} />
-          請確認
-        </h3>
-        <p className="text-slate-600 mb-6 leading-relaxed">{message}</p>
-        <div className="flex justify-end gap-3">
-          <button onClick={onCancel} className="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded-xl font-medium text-sm">取消</button>
-          <button onClick={onConfirm} className={`px-4 py-2 text-white rounded-xl font-medium text-sm shadow-sm ${isDestructive ? 'bg-red-500 hover:bg-red-600' : 'bg-slate-800 hover:bg-slate-900'}`}>確定</button>
-        </div>
-      </div>
-    </div>
-  );
-};
+// (修正版) 針對單一動作的歷史數據管理彈窗 - 改為按鈕內確認
+const HistoryManagementModal = ({ isOpen, onClose, data, onUpdate, targetId }: any) => {
+  const [deleteId, setDeleteId] = useState<string | null>(null); // 新增：暫存要刪除的 ID
 
-const DataTransferModal = ({ isOpen, type, data, onImport, onClose }: { isOpen: boolean, type: 'export' | 'import', data?: UserData, onImport?: (data: UserData) => void, onClose: () => void }) => {
-  const [jsonString, setJsonString] = useState('');
-  const [copySuccess, setCopySuccess] = useState(false);
-  const [importError, setImportError] = useState<string | null>(null);
-
+  // 關閉時重置
   useEffect(() => {
-    if (isOpen && type === 'export' && data) {
-      setJsonString(JSON.stringify(data, null, 2));
-      setCopySuccess(false);
+    if (!isOpen) setDeleteId(null);
+  }, [isOpen]);
+
+  if (!isOpen || !targetId) return null;
+  
+  const targetEx = data.exercises.find((e:any) => e.id === targetId);
+  const logs = data.logs
+    .filter((l:any) => l.exerciseId === targetId)
+    .sort((a:any, b:any) => b.date.localeCompare(a.date));
+
+  const handleDelete = (e: React.MouseEvent, logId: string) => {
+    e.stopPropagation();
+    if (deleteId === logId) {
+      // 第二次點擊，確認刪除
+      const updatedLogs = data.logs.filter((l:any) => l.id !== logId);
+      onUpdate({...data, logs: updatedLogs});
+      setDeleteId(null);
     } else {
-      setJsonString('');
-      setImportError(null);
-    }
-  }, [isOpen, type, data]);
-
-  const handleCopy = () => {
-    const textArea = document.createElement("textarea");
-    textArea.value = jsonString;
-    textArea.style.position = 'fixed';
-    textArea.style.left = '-9999px';
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-    try {
-      document.execCommand('copy');
-      setCopySuccess(true);
-      setTimeout(() => setCopySuccess(false), 2000);
-    } catch (err) {
-      console.error('Copy failed', err);
-    }
-    document.body.removeChild(textArea);
-  };
-
-  const handleImportSubmit = () => {
-    try {
-      const parsed = JSON.parse(jsonString);
-      if (!parsed.goals || !Array.isArray(parsed.entries)) throw new Error("無效格式");
-      if (onImport) onImport(parsed);
-      onClose();
-    } catch (e) {
-      setImportError("格式錯誤，請確認貼上的是完整代碼。");
+      // 第一次點擊，進入確認狀態
+      setDeleteId(logId);
+      // 3秒後自動取消確認狀態
+      setTimeout(() => setDeleteId(prev => prev === logId ? null : prev), 3000);
     }
   };
-
-  if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-[2px] flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 border border-slate-100 flex flex-col max-h-[80vh]">
+    <div className="fixed inset-0 bg-black/70 z-[9999] flex items-center justify-center p-4 backdrop-blur-md" onClick={onClose}>
+      <div className="bg-white rounded-[2rem] w-full max-w-md p-6 shadow-2xl flex flex-col max-h-[70vh] animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-            {type === 'export' ? <Download size={20} className="text-indigo-500"/> : <Upload size={20} className="text-teal-500"/>}
-            {type === 'export' ? '匯出備份 (複製代碼)' : '匯入還原 (貼上代碼)'}
+          <h3 className="font-black text-lg flex items-center gap-2 text-slate-800">
+            <Database className="text-indigo-600" size={20}/> 
+            {targetEx?.name} 歷史數據
           </h3>
-          <button onClick={onClose}><X size={20} className="text-slate-400 hover:text-slate-600"/></button>
+          <button onClick={onClose} type="button" className="p-2 bg-slate-100 rounded-full text-slate-400 hover:bg-slate-200 transition-colors"><X size={20}/></button>
         </div>
         
-        {type === 'export' && (
-           <div className="bg-indigo-50 p-3 rounded-lg text-indigo-700 text-xs mb-3 flex items-start gap-2">
-             <AlertCircle size={14} className="mt-0.5 shrink-0"/>
-             <span>請全選並複製下方代碼，傳送到您的手機或另一台電腦，使用「匯入」功能即可同步資料。</span>
-           </div>
-        )}
-
-        <textarea 
-          className="flex-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-3 font-mono text-xs text-slate-600 resize-none outline-none focus:ring-2 focus:ring-indigo-500 mb-4 min-h-[200px]"
-          value={jsonString}
-          onChange={e => setJsonString(e.target.value)}
-          readOnly={type === 'export'}
-          onClick={type === 'export' ? e => e.currentTarget.select() : undefined}
-          placeholder={type === 'import' ? '在此貼上資料代碼...' : ''}
-        />
-        {importError && <div className="text-red-500 text-xs mb-3 flex items-center gap-1"><AlertCircle size={12}/> {importError}</div>}
-        <div className="flex justify-end gap-2">
-          {type === 'export' ? (
-            <button onClick={handleCopy} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${copySuccess ? 'bg-green-100 text-green-700' : 'bg-indigo-600 text-white'}`}>{copySuccess ? <><Check size={16}/> 已複製</> : <><Copy size={16}/> 複製代碼</>}</button>
+        <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+          {logs.length === 0 ? (
+            <div className="text-center py-12 flex flex-col items-center justify-center opacity-50">
+              <ClipboardList size={40} className="mb-2"/>
+              <p className="font-bold">目前沒有任何紀錄</p>
+            </div>
           ) : (
-            <button onClick={handleImportSubmit} className="px-4 py-2 bg-teal-600 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"><Check size={16}/> 確認匯入</button>
+            logs.map((log:any) => (
+              <div key={log.id} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl border border-slate-100 hover:border-indigo-200 transition-colors group">
+                <div className="flex items-center gap-3">
+                  <div className="bg-white border border-slate-200 px-2.5 py-1 rounded-lg text-xs font-black text-slate-500 shadow-sm">{log.date}</div>
+                  <div className="flex flex-col">
+                    <div className="flex items-baseline gap-1">
+                        <span className="font-black text-slate-800 text-lg">{log.originalWeight}</span>
+                        <span className="text-[10px] text-slate-400 font-bold uppercase">{log.originalUnit}</span>
+                    </div>
+                    <span className="text-[10px] text-indigo-500 font-bold bg-indigo-50 px-1.5 rounded-md w-fit">{log.reps} reps</span>
+                  </div>
+                </div>
+                <button 
+                  type="button"
+                  onClick={(e) => handleDelete(e, log.id)} 
+                  className={`p-2.5 rounded-xl transition-all shadow-sm active:scale-90 flex items-center gap-1 ${
+                    deleteId === log.id 
+                    ? 'bg-red-500 text-white hover:bg-red-600 w-24 justify-center' 
+                    : 'text-slate-300 bg-white border border-slate-100 hover:text-red-500 hover:bg-red-50 hover:border-red-100'
+                  }`}
+                >
+                  {deleteId === log.id ? <><Trash2 size={16}/> 確認?</> : <Trash2 size={16}/>}
+                </button>
+              </div>
+            ))
           )}
         </div>
       </div>
@@ -226,451 +131,277 @@ const DataTransferModal = ({ isOpen, type, data, onImport, onClose }: { isOpen: 
   );
 };
 
-// --- 輔助函式 ---
-const calculateBodyStats = (entries: BodyEntry[]) => {
-  if (!entries || entries.length === 0) return [];
-  const sorted = [...entries].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  const withAvg = sorted.map((entry) => {
-    const currentDate = new Date(entry.date).getTime();
-    const last7DaysEntries = sorted.filter(e => {
-      const d = new Date(e.date).getTime();
-      return d <= currentDate && d > currentDate - (24 * 60 * 60 * 1000 * 7);
-    });
-    const sumWeight = last7DaysEntries.reduce((sum, e) => sum + e.weight, 0);
-    const avgWeight = last7DaysEntries.length > 0 ? sumWeight / last7DaysEntries.length : entry.weight;
-    return { ...entry, avgWeight: parseFloat(avgWeight.toFixed(2)) };
-  });
-  return withAvg.map((entry, index) => {
-    let isGain = false;
-    if (index > 0) isGain = entry.avgWeight > withAvg[index - 1].avgWeight;
-    return { ...entry, isGain };
-  });
-};
-const lbsToKg = (lbs: number) => lbs / 2.20462;
-const calculate1RM = (weight: number, reps: number) => {
-  if (!reps || reps <= 1) return weight;
-  return weight * (1 + reps / 30);
-};
-
-// --- 頁面元件：體態追蹤 ---
-const BodyMetricsView = ({ data, onUpdate }: { data: UserData, onUpdate: (newData: UserData) => void }) => {
-  const [inputDate, setInputDate] = useState(new Date().toISOString().split('T')[0]);
-  const [inputWeight, setInputWeight] = useState('');
-  const [inputBodyFat, setInputBodyFat] = useState('');
-  const [inputPhoto, setInputPhoto] = useState<string | undefined>(undefined);
-  const [isEditingGoals, setIsEditingGoals] = useState(false);
-  const [localGoals, setLocalGoals] = useState<Goals>(data.goals);
-  
-  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
-  const [editEntryDate, setEditEntryDate] = useState('');
-  const [editEntryWeight, setEditEntryWeight] = useState('');
-  const [editEntryBodyFat, setEditEntryBodyFat] = useState('');
-  const [editEntryPhoto, setEditEntryPhoto] = useState<string | undefined>(undefined);
-  
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const editFileInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => { if (data.goals) setLocalGoals(data.goals); }, [data.goals]);
-
-  const [modalConfig, setModalConfig] = useState<{ isOpen: boolean; message: string; action: () => void; isDestructive: boolean; }>({ isOpen: false, message: '', action: () => {}, isDestructive: false });
-
-  const chartData = useMemo(() => calculateBodyStats(data.entries), [data.entries]);
-  
-  const chartDomain = useMemo(() => {
-    const weights = data.entries.map(e => e.weight);
-    const target = Number(data.goals.targetWeight);
-    if (!isNaN(target)) weights.push(target);
-    if (weights.length === 0) return ['auto', 'auto'];
-    const min = Math.min(...weights);
-    const max = Math.max(...weights);
-    return [Math.floor(min - 1), Math.ceil(max + 1)];
-  }, [data.entries, data.goals.targetWeight]);
-
-  const currentStats = useMemo(() => {
-    if (!data.entries || data.entries.length === 0) return null;
-    return [...data.entries].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
-  }, [data.entries]);
-  const daysRemaining = useMemo(() => {
-    if (!data.goals) return 0;
-    const today = new Date();
-    const target = new Date(data.goals.targetDate);
-    return Math.max(0, Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
-  }, [data.goals]);
-
-  const handleSaveGoals = () => { onUpdate({ ...data, goals: localGoals }); setIsEditingGoals(false); };
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      try {
-        const compressed = await compressImage(e.target.files[0]);
-        setInputPhoto(compressed);
-      } catch (err) {
-        console.error("Photo process error", err);
-        alert("照片處理失敗");
-      }
-    }
+const ExerciseLibraryModal = ({ isOpen, onClose, data, onUpdate }: any) => {
+  const [filterMuscle, setFilterMuscle] = useState<string>('胸');
+  if (!isOpen) return null;
+  const toggleStatus = (id: string, current: boolean) => {
+    onUpdate({ ...data, exercises: data.exercises.map((e: any) => e.id === id ? { ...e, isTracked: !current } : e) });
   };
-  
-  const handleEditFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      try {
-        const compressed = await compressImage(e.target.files[0]);
-        setEditEntryPhoto(compressed);
-      } catch (err) {
-        console.error("Photo process error", err);
-        alert("照片處理失敗");
-      }
-    }
+  const updateEx = (id: string, field: string, val: string) => {
+    onUpdate({ ...data, exercises: data.exercises.map((e: any) => e.id === id ? { ...e, [field]: val } : e) });
   };
-
-  const handleAddEntry = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputWeight || !inputDate) return;
-    const newEntry: BodyEntry = {
-      id: Date.now().toString(), date: inputDate, weight: parseFloat(inputWeight),
-      ...(inputBodyFat ? { bodyFat: parseFloat(inputBodyFat) } : {}),
-      ...(inputPhoto ? { photo: inputPhoto } : {})
-    };
-    const existingIndex = data.entries.findIndex(ent => ent.date === inputDate);
-    if (existingIndex >= 0) {
-      setModalConfig({
-        isOpen: true, message: '這一天已經有紀錄了，要覆蓋它嗎？', isDestructive: false,
-        action: () => {
-          const newEntries = [...data.entries];
-          if (!inputPhoto && newEntries[existingIndex].photo) {
-             newEntry.photo = newEntries[existingIndex].photo;
-          }
-          newEntries[existingIndex] = { ...newEntry, id: newEntries[existingIndex].id };
-          onUpdate({ ...data, entries: newEntries });
-          setInputWeight(''); setInputBodyFat(''); setInputPhoto(undefined);
-          setModalConfig(prev => ({ ...prev, isOpen: false }));
-        }
-      });
-    } else {
-      onUpdate({ ...data, entries: [...data.entries, newEntry] });
-      setInputWeight(''); setInputBodyFat(''); setInputPhoto(undefined);
-    }
-  };
-
-  const handleDeleteEntry = (id: string) => {
-    setModalConfig({
-      isOpen: true, message: '確定要刪除這筆紀錄嗎？', isDestructive: true,
-      action: () => {
-        onUpdate({ ...data, entries: data.entries.filter(e => e.id !== id) });
-        setModalConfig(prev => ({ ...prev, isOpen: false }));
-      }
-    });
-  };
-
-  const startEditEntry = (entry: BodyEntry) => { 
-    setEditingEntryId(entry.id); 
-    setEditEntryDate(entry.date); 
-    setEditEntryWeight(entry.weight.toString()); 
-    setEditEntryBodyFat(entry.bodyFat ? entry.bodyFat.toString() : '');
-    setEditEntryPhoto(entry.photo);
-  };
-
-  const saveEditEntry = () => {
-    if (editingEntryId && editEntryWeight && editEntryDate) {
-      const updatedEntries = data.entries.map(e => {
-        if (e.id === editingEntryId) {
-          return {
-            ...e,
-            date: editEntryDate,
-            weight: parseFloat(editEntryWeight),
-            bodyFat: editEntryBodyFat ? parseFloat(editEntryBodyFat) : undefined,
-            photo: editEntryPhoto
-          };
-        }
-        return e;
-      });
-      onUpdate({ ...data, entries: updatedEntries });
-      setEditingEntryId(null);
-    }
-  };
-
   return (
-    <div className="space-y-6 pb-20">
-      <ConfirmModal isOpen={modalConfig.isOpen} message={modalConfig.message} onConfirm={modalConfig.action} onCancel={() => setModalConfig(prev => ({ ...prev, isOpen: false }))} isDestructive={modalConfig.isDestructive} />
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="md:col-span-1 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-          <div className="flex justify-between mb-4"><div className="flex items-center gap-2"><Target size={20}/><h2 className="font-semibold">我的目標</h2></div><button onClick={() => isEditingGoals ? (onUpdate({ ...data, goals: localGoals }), setIsEditingGoals(false)) : setIsEditingGoals(true)} className="text-xs text-teal-600 bg-teal-50 px-2 py-1 rounded">{isEditingGoals ? '儲存' : '修改'}</button></div>
-          {isEditingGoals ? <div className="space-y-3"><input type="number" value={localGoals.targetWeight} onChange={e=>setLocalGoals({...localGoals, targetWeight: e.target.value})} className="w-full border p-2 text-sm rounded"/><input type="number" value={localGoals.targetBodyFat} onChange={e=>setLocalGoals({...localGoals, targetBodyFat: e.target.value})} className="w-full border p-2 text-sm rounded"/><input type="date" value={localGoals.targetDate} onChange={e=>setLocalGoals({...localGoals, targetDate: e.target.value})} className="w-full border p-2 text-sm rounded"/></div> 
-          : <div className="space-y-4"><div className="flex justify-between"><span className="text-sm text-slate-500">目標體重</span><span className="text-xl font-bold">{data.goals?.targetWeight} kg</span></div><div className="flex justify-between"><span className="text-sm text-slate-500">目標體脂</span><span className="text-xl font-bold">{data.goals?.targetBodyFat} %</span></div><div className="pt-2 border-t mt-2 flex justify-between text-sm"><span className="text-slate-500">剩餘天數</span><span className="font-bold text-orange-500">{daysRemaining} 天</span></div></div>}
-        </div>
-        <div className="md:col-span-2 bg-gradient-to-br from-teal-600 to-teal-700 text-white p-6 rounded-2xl shadow-md">
-           <h2 className="text-teal-100 font-medium flex items-center gap-2"><Scale size={18} /> 當前狀態</h2>
-           {currentStats && <div className="mt-4 flex justify-between items-end"><div><div className="text-3xl font-bold">{currentStats.weight} kg</div><div className="text-sm text-teal-100 opacity-80">距離目標: {(currentStats.weight - Number(data.goals.targetWeight)).toFixed(1)} kg</div></div><div className="text-right"><div className="text-xs text-teal-100 opacity-70">7日平均</div><div className="text-xl font-bold">{chartData.find(d => d.date === currentStats.date)?.avgWeight} kg</div></div></div>}
-        </div>
-      </div>
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-        <h2 className="font-semibold text-slate-600 mb-4 flex items-center gap-2"><Plus size={20}/> 新增體重/照片</h2>
-        <form onSubmit={handleAddEntry} className="flex flex-col md:flex-row gap-4 items-end">
-          <div className="w-full md:w-auto flex-1"><label className="text-xs text-slate-500 block">日期</label><input type="date" required value={inputDate} onChange={e=>setInputDate(e.target.value)} className="w-full border p-2 rounded" /></div>
-          <div className="w-full md:w-auto flex-1"><label className="text-xs text-slate-500 block">體重 (kg)</label><input type="number" step="0.1" required value={inputWeight} onChange={e=>setInputWeight(e.target.value)} className="w-full border p-2 rounded" /></div>
-          <div className="w-full md:w-auto flex-1"><label className="text-xs text-slate-500 block">體脂 (%)</label><input type="number" step="0.1" placeholder="選填" value={inputBodyFat} onChange={e=>setInputBodyFat(e.target.value)} className="w-full border p-2 rounded" /></div>
-          <div className="w-full md:w-auto flex items-end">
-            <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleFileChange} />
-            <button type="button" onClick={() => fileInputRef.current?.click()} className={`p-2.5 rounded border border-slate-200 flex items-center gap-2 ${inputPhoto ? 'bg-teal-50 text-teal-600 border-teal-200' : 'bg-white text-slate-500'}`}>
-               <Camera size={20} /> {inputPhoto ? '已選照片' : '體態照'}
-            </button>
-          </div>
-          <button type="submit" className="w-full md:w-auto bg-teal-600 text-white px-6 py-2 rounded font-medium">儲存</button>
-        </form>
-      </div>
-      {data.entries.length > 0 && (
-        <>
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 h-[300px]">
-            <h2 className="font-semibold text-slate-600 mb-4 flex items-center gap-2"><Activity size={20}/> 體重趨勢</h2>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false}/>
-                <XAxis 
-                  dataKey="date" 
-                  tickFormatter={s=>s.slice(5)} 
-                  fontSize={12} 
-                  stroke="#334155" 
-                  tick={{ fill: '#000000', fontWeight: 700 }}
-                  tickMargin={10}
-                />
-                <YAxis 
-                  domain={chartDomain} 
-                  fontSize={12} 
-                  stroke="#334155" 
-                  tick={{ fill: '#000000', fontWeight: 700 }}
-                  unit="kg"
-                />
-                <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                <Legend wrapperStyle={{paddingTop: '10px'}}/>
-                <ReferenceLine y={Number(data.goals.targetWeight)} label={{ value: "目標", fill: "#dc2626", fontSize: 13, fontWeight: '800', position: 'insideTopRight' }} stroke="#dc2626" strokeWidth={4} strokeDasharray="0" opacity={1}/>
-                <Line name="體重" dataKey="weight" stroke="#94a3b8" strokeWidth={2} dot={{r:3}} activeDot={{r:5}}/>
-                <Line name="7日平均" dataKey="avgWeight" stroke="#0d9488" strokeWidth={3} dot={(p:any)=>{const {cx,cy,payload,key}=p;if(payload.isGain){return<circle key={key} cx={cx} cy={cy} r={5} fill="#ef4444" stroke="#fff" strokeWidth={2}/>}return<circle key={key} cx={cx} cy={cy} r={0} />}} activeDot={{r:6}}/>
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="p-4 border-b font-semibold text-slate-700">歷史紀錄</div>
-            <div className="max-h-60 overflow-y-auto divide-y">
-              {[...data.entries].sort((a,b)=>new Date(b.date).getTime()-new Date(a.date).getTime()).map(e => (
-                <div key={e.id} className="p-3 flex justify-between items-center hover:bg-slate-50">
-                  {editingEntryId === e.id ? (
-                    <div className="flex flex-wrap gap-2 w-full items-center">
-                      <input type="date" value={editEntryDate} onChange={ev=>setEditEntryDate(ev.target.value)} className="border p-1 text-sm w-32"/>
-                      <input type="number" value={editEntryWeight} onChange={ev=>setEditEntryWeight(ev.target.value)} className="border p-1 text-sm w-20"/>
-                      <input type="number" value={editEntryBodyFat} onChange={ev=>setEditEntryBodyFat(ev.target.value)} className="border p-1 text-sm w-16" placeholder="體脂"/>
-                      <input type="file" accept="image/*" className="hidden" ref={editFileInputRef} onChange={handleEditFileChange} />
-                      <button onClick={() => editFileInputRef.current?.click()} className={`p-1.5 rounded border flex items-center justify-center w-8 ${editEntryPhoto ? 'bg-teal-50 text-teal-600 border-teal-200' : 'text-slate-400'}`} title="更換照片"><Camera size={16}/></button>
-                      <div className="flex gap-1 ml-auto"><button onClick={saveEditEntry} className="text-green-600 ml-auto"><Check size={16}/></button><button onClick={()=>setEditingEntryId(null)} className="text-slate-400"><X size={16}/></button></div>
-                    </div>
-                  ) : (
-                    <><div className="flex gap-4 items-center"><span className="text-slate-500 text-sm">{e.date}</span><span className="font-bold">{e.weight} kg</span>{e.bodyFat && <span className="text-slate-600 text-sm">{e.bodyFat}%</span>}{e.photo && <ImageIcon size={16} className="text-teal-500" />}</div><div className="flex gap-2"><button onClick={()=>startEditEntry(e)} className="text-slate-400 hover:text-teal-600"><Edit2 size={16}/></button><button onClick={() => handleDeleteEntry(e.id)} className="text-slate-400 hover:text-red-500"><Trash2 size={16}/></button></div></>
-                  )}
-                </div>
-              ))}
+    <div className="fixed inset-0 bg-black/70 z-[9999] flex items-center justify-center p-4 backdrop-blur-md">
+      <div className="bg-white rounded-[2.5rem] w-full max-w-lg p-6 shadow-2xl flex flex-col max-h-[85vh]">
+        <div className="flex justify-between items-center mb-6"><h3 className="font-black text-xl flex items-center gap-2 text-slate-800"><BookOpen className="text-indigo-600"/> 動作資料庫</h3><button onClick={onClose} className="p-2 bg-slate-100 rounded-full"><X size={20}/></button></div>
+        <div className="flex gap-2 overflow-x-auto pb-2 mb-2 no-scrollbar">{['胸', '背', '肩', '腿'].map(m => (<button key={m} onClick={() => setFilterMuscle(m)} className={`px-4 py-2 rounded-xl text-xs font-black whitespace-nowrap ${filterMuscle === m ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-100 text-slate-400'}`}>{m}</button>))}</div>
+        <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+          {data.exercises.filter((e: any) => e.muscle === filterMuscle).map((ex: any) => (
+            <div key={ex.id} className={`p-4 rounded-2xl border ${ex.isTracked !== false ? 'bg-white border-slate-200' : 'bg-slate-50 border-slate-100 opacity-60'}`}>
+              <div className="flex items-center gap-2 mb-2"><input type="text" value={ex.name} onChange={e => updateEx(ex.id, 'name', e.target.value)} className="flex-1 font-black text-slate-700 bg-transparent outline-none border-b border-transparent focus:border-indigo-300" /><button onClick={() => toggleStatus(ex.id, ex.isTracked !== false)} className={`p-2 rounded-lg ${ex.isTracked !== false ? 'text-teal-500 bg-teal-50' : 'text-slate-400 bg-slate-200'}`}>{ex.isTracked !== false ? <Eye size={16} /> : <EyeOff size={16} />}</button></div>
+              <div className="flex gap-2"><select value={ex.type} onChange={e => updateEx(ex.id, 'type', e.target.value)} className="bg-slate-100 text-[10px] p-2 rounded-lg outline-none font-bold text-slate-500">{['啞鈴', '槓鈴', 'W槓', '繩索', '器械', '自體重'].map(t => <option key={t} value={t}>{t}</option>)}</select><select value={ex.defaultUnit || 'kg'} onChange={e => updateEx(ex.id, 'defaultUnit', e.target.value)} className="bg-slate-100 text-[10px] p-2 rounded-lg outline-none font-bold text-slate-500"><option value="kg">預設: KG</option><option value="lbs">預設: LBS</option></select></div>
             </div>
-          </div>
-        </>
-      )}
+          ))}
+          {data.exercises.filter((e: any) => e.muscle === filterMuscle).length === 0 && <div className="text-center py-10 text-slate-300 font-bold">此部位尚無動作</div>}
+        </div>
+      </div>
     </div>
   );
 };
 
-// --- 新增：體態分析頁面 ---
-const BodyAnalysisView = ({ data }: { data: UserData }) => {
-  const [startDate, setStartDate] = useState(() => {
-    const d = new Date();
-    d.setMonth(d.getMonth() - 1);
-    return d.toISOString().split('T')[0];
-  });
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+const DataTransferModal = ({ isOpen, type, data, onImport, onClose }: any) => {
+  const [json, setJson] = useState('');
+  useEffect(() => { if (isOpen && type === 'export') setJson(JSON.stringify(data, null, 2)); }, [isOpen, type, data]);
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl w-full max-w-lg p-6 flex flex-col max-h-[80vh]">
+        <div className="flex justify-between mb-4 font-bold"><h3>數據管理</h3><button onClick={onClose}><X/></button></div>
+        <textarea className="flex-1 border rounded p-2 font-mono text-[10px] mb-4 outline-none" value={json} onChange={e=>setJson(e.target.value)} readOnly={type==='export'} />
+        <button onClick={()=>{ if(type==='export') {navigator.clipboard.writeText(json); alert('已複製');} else {onImport(JSON.parse(json)); onClose();}}} className="bg-indigo-600 text-white py-2 rounded-lg font-bold">執行</button>
+      </div>
+    </div>
+  );
+};
 
-  const filteredEntries = useMemo(() => {
-    // 篩選出有照片的紀錄，並按日期由舊到新排序 (Ascending)
-    return data.entries.filter(e => e.date >= startDate && e.date <= endDate && e.photo)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }, [data.entries, startDate, endDate]);
+const CopyWorkoutModal = ({ isOpen, onClose, data, onCopy }: any) => {
+  const [viewDate, setViewDate] = useState(new Date());
+  useEffect(() => { if (isOpen) setViewDate(new Date()); }, [isOpen]);
+  if (!isOpen) return null;
+  const year = viewDate.getFullYear(); const month = viewDate.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstDay = new Date(year, month, 1).getDay();
+  const calendarDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const blanks = Array.from({ length: firstDay }, (_, i) => i);
+  const today = new Date();
+  return (
+    <div className="fixed inset-0 bg-black/70 z-[9999] flex items-center justify-center p-4 backdrop-blur-md">
+      <div className="bg-white rounded-[2.5rem] w-full max-w-md p-6 shadow-2xl flex flex-col animate-in zoom-in-95 duration-200">
+        <div className="flex justify-between mb-6"><h3 className="font-black text-xl flex items-center gap-2"><History className="text-indigo-600"/> 複製歷史課表</h3><button onClick={onClose} className="p-2 bg-slate-100 rounded-full"><X size={20}/></button></div>
+        <div className="flex justify-between items-center mb-4 bg-slate-50 p-2 rounded-2xl">
+          <button onClick={()=>setViewDate(new Date(year, month-1, 1))} className="p-2 hover:bg-white rounded-xl"><ChevronLeft/></button>
+          <span className="font-black text-slate-700">{year}年 {month + 1}月</span>
+          <button onClick={()=>setViewDate(new Date(year, month+1, 1))} className="p-2 hover:bg-white rounded-xl"><ChevronRight/></button>
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-center mb-2">{['日','一','二','三','四','五','六'].map(d=><div key={d} className="text-[10px] font-black text-slate-300">{d}</div>)}</div>
+        <div className="grid grid-cols-7 gap-2 text-center mb-4">
+          {blanks.map(b=><div key={`b-${b}`} className="aspect-square"/>)}
+          {calendarDays.map(day => {
+            const dStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+            const plan = data.dailyPlans?.[dStr];
+            const isToday = today.getFullYear()===year && today.getMonth()===month && today.getDate()===day;
+            return (
+              <button key={day} disabled={!plan} onClick={()=>{onCopy(dStr); onClose();}} className={`aspect-square rounded-2xl flex flex-col items-center justify-center relative transition-all border-2 ${plan ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg active:scale-90 z-10' : 'bg-white border-slate-50 text-slate-300'} ${isToday&&!plan?'border-indigo-200 text-indigo-600':''}`}>
+                <span className="text-xs font-black">{day}</span>
+                {plan && <span className="text-[6px] absolute bottom-1 px-1 truncate w-full font-bold text-indigo-100">{plan.slice(0,4)}</span>}
+                {isToday && <div className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full border-2 border-white"/>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
 
-  const diffWeight = useMemo(() => {
-    // 計算該區間所有體重數據的變化 (不論有無照片)
-    const allEntriesInRange = data.entries.filter(e => e.date >= startDate && e.date <= endDate)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-      
-    if (allEntriesInRange.length < 2) return 0;
-    const first = allEntriesInRange[0].weight; // 第一筆 (最舊)
-    const last = allEntriesInRange[allEntriesInRange.length - 1].weight; // 最後一筆 (最新)
-    return (last - first).toFixed(1);
-  }, [data.entries, startDate, endDate]);
+const TrainingRow = ({ log, index, onUpdate, onDelete, onDuplicate, onInsertAfter }: any) => {
+  const [w, setW] = useState(log.originalWeight.toString());
+  const [r, setR] = useState(log.reps.toString());
+  // 增加刪除確認狀態
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  useEffect(() => { setW(log.originalWeight.toString()); setR(log.reps.toString()); }, [log]);
+  const save = (nu?: string) => {
+    const weight = parseFloat(w) || 0; const reps = parseInt(r) || 0; const unit = nu || log.originalUnit;
+    onUpdate({ ...log, originalWeight: weight, reps, originalUnit: unit, weight: unit === 'kg' ? weight : lbsToKg(weight) });
+  };
+  
+  const handleDeleteClick = () => {
+    if (isDeleting) {
+      onDelete();
+    } else {
+      setIsDeleting(true);
+      setTimeout(() => setIsDeleting(false), 3000);
+    }
+  };
+
+  return (
+    <div className="group space-y-1">
+      <div className="flex items-center gap-2 bg-slate-700/40 p-2 rounded-lg">
+        <span className="text-slate-500 font-mono text-[10px] w-4">{index+1}</span>
+        <input type="number" value={w} onChange={e=>setW(e.target.value)} onBlur={()=>save()} className="w-full bg-slate-900 border-none rounded p-1 text-center text-white text-sm outline-none" />
+        <button onClick={()=>{const nu=log.originalUnit==='kg'?'lbs':'kg'; save(nu);}} className="text-[10px] bg-slate-800 px-2 py-1 rounded border border-slate-600 text-slate-400 font-bold">{log.originalUnit.toUpperCase()}</button>
+        <input type="number" value={r} onChange={e=>setR(e.target.value)} onBlur={()=>save()} className="w-full bg-slate-900 border-none rounded p-1 text-center text-white text-sm outline-none" />
+        <div className="flex gap-1">
+          <button onClick={onDuplicate}><Copy size={14} className="text-slate-400 hover:text-white"/></button>
+          <button onClick={handleDeleteClick} className={`${isDeleting ? 'text-red-500 animate-pulse' : 'text-slate-400 hover:text-red-500'}`}>
+            <Trash2 size={14}/>
+          </button>
+        </div>
+      </div>
+      <div className="h-0 group-hover:h-6 opacity-0 group-hover:opacity-100 transition-all flex justify-center overflow-hidden"><button onClick={onInsertAfter} className="text-[9px] bg-indigo-900 text-indigo-200 px-3 rounded-full">+ 插入</button></div>
+    </div>
+  );
+};
+const BodyMetricsView = ({ data, onUpdate }: any) => {
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [weight, setWeight] = useState('');
+  const [bodyFat, setBodyFat] = useState('');
+  const [photo, setPhoto] = useState<string | undefined>();
+  const chartData = useMemo(() => {
+    const sorted = [...data.entries].sort((a,b)=>a.date.localeCompare(b.date));
+    return sorted.map((e, i, arr) => {
+      const avg = arr.slice(Math.max(0, i-6), i+1).reduce((s, x)=>s+x.weight, 0) / Math.min(i+1, 7);
+      return { ...e, avgWeight: parseFloat(avg.toFixed(2)) };
+    });
+  }, [data.entries]);
+  const latest = chartData[chartData.length - 1] || { weight: 0, avgWeight: 0 };
+  const targetW = Number(data.goals?.targetWeight) || 0;
+  const daysLeft = Math.max(0, Math.ceil((new Date(data.goals?.targetDate || '2026-12-31').getTime() - new Date().getTime()) / 86400000));
 
   return (
     <div className="space-y-6 pb-20">
-      <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col md:flex-row gap-4 items-center justify-between">
-         <div className="flex items-center gap-2 w-full md:w-auto">
-            <CalendarIcon size={20} className="text-slate-500"/>
-            <input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} className="border p-2 rounded text-sm"/>
-            <span className="text-slate-400">至</span>
-            <input type="date" value={endDate} onChange={e=>setEndDate(e.target.value)} className="border p-2 rounded text-sm"/>
-         </div>
-         <div className="flex items-center gap-4 bg-slate-50 px-4 py-2 rounded-lg">
-            <span className="text-xs text-slate-500">區間變化</span>
-            <span className={`font-bold text-lg ${Number(diffWeight) > 0 ? 'text-red-500' : 'text-green-600'}`}>{Number(diffWeight) > 0 ? '+' : ''}{diffWeight} kg</span>
-         </div>
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <div className="bg-white p-6 rounded-[1.5rem] shadow-sm md:col-span-2 border border-slate-100">
+          <div className="flex justify-between mb-6 font-bold text-slate-700"><h3><Target className="inline mr-2" size={18}/> 我的目標</h3><button className="text-xs text-teal-600 bg-teal-50 px-2 py-1 rounded-full">修改</button></div>
+          <div className="space-y-4">
+            <div className="flex justify-between border-b pb-2"><span>目標體重</span><span className="font-black">{targetW} kg</span></div>
+            <div className="flex justify-between border-b pb-2"><span>目標體脂</span><span className="font-black">{data.goals?.targetBodyFat || '--'} %</span></div>
+            <div className="flex justify-between pt-2"><span>剩餘天數</span><span className="font-black text-orange-500">{daysLeft} 天</span></div>
+          </div>
+        </div>
+        <div className="bg-[#1a9478] p-8 rounded-[1.5rem] shadow-lg md:col-span-3 text-white flex flex-col justify-between relative overflow-hidden">
+          <div className="absolute top-4 left-4 opacity-20"><Scale size={24}/></div>
+          <div><h3 className="text-sm font-bold opacity-80 mb-4">當前狀態</h3><div className="flex items-baseline gap-2"><span className="text-6xl font-black">{latest.weight || '--'}</span><span className="text-xl font-bold">kg</span></div><div className="text-sm mt-2 opacity-90 font-bold">距離目標: {(latest.weight - targetW).toFixed(1)} kg</div></div>
+          <div className="self-end text-right"><div className="text-xs opacity-70 font-bold mb-1">7日平均</div><div className="text-3xl font-black">{latest.avgWeight || '--'} kg</div></div>
+        </div>
       </div>
+      <div className="bg-white p-6 rounded-[1.5rem] shadow-sm border border-slate-100">
+        <h2 className="font-black mb-6 flex items-center gap-2"><PlusCircle className="text-teal-600"/> 新增紀錄</h2>
+        <div className="flex flex-col md:flex-row gap-4">
+          <input type="date" value={date} onChange={e=>setDate(e.target.value)} className="flex-1 border p-2.5 rounded-xl font-bold outline-none" />
+          <input type="number" placeholder="體重" value={weight} onChange={e=>setWeight(e.target.value)} className="flex-1 border p-2.5 rounded-xl font-bold outline-none" />
+          <input type="number" placeholder="體脂" value={bodyFat} onChange={e=>setBodyFat(e.target.value)} className="flex-1 border p-2.5 rounded-xl font-bold outline-none" />
+          <button onClick={async()=>{const i=document.createElement('input');i.type='file';i.accept='image/*';i.onchange=async(e:any)=>setPhoto(await compressImage(e.target.files[0]));i.click();}} className={`p-2.5 border-2 border-dashed rounded-xl flex items-center gap-2 px-4 ${photo?'bg-teal-50 text-teal-600 border-teal-200':'text-slate-400'}`}><Camera size={18}/></button>
+          <button onClick={()=>{if(!weight)return; onUpdate({...data, entries:[...data.entries.filter((e:any)=>e.date!==date), {id:Date.now().toString(),date,weight:parseFloat(weight),bodyFat:bodyFat?parseFloat(bodyFat):undefined,photo}]}); setWeight(''); setBodyFat(''); setPhoto(undefined);}} className="bg-[#1a9478] text-white px-8 py-2.5 rounded-xl font-black">儲存</button>
+        </div>
+      </div>
+      <div className="bg-white p-6 rounded-[1.5rem] border border-slate-100 h-[250px] shadow-sm relative">
+        <div className="absolute top-4 left-6 z-10"><p className="text-sm font-black text-slate-700">體重趨勢圖</p></div>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={chartData} margin={{top:50,right:10,left:-20,bottom:0}}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/><XAxis dataKey="date" tickFormatter={s=>s.slice(5)} fontSize={10}/><YAxis domain={['auto','auto']} fontSize={10}/><Tooltip/>
+            <ReferenceLine y={targetW} stroke="#ef4444" strokeWidth={2} label={{value:'目標', position:'insideTopRight', fill:'#ef4444', fontSize:10}}/>
+            <Line type="monotone" name="體重" dataKey="weight" stroke="#1a9478" strokeWidth={3} dot={{r:4, fill:'#1a9478', stroke:'#fff'}}/>
+            <Line type="monotone" name="7日平均" dataKey="avgWeight" stroke="#94a3b8" strokeWidth={2} strokeDasharray="5 5" dot={false}/>
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="bg-white rounded-[1.5rem] shadow-sm border border-slate-100 overflow-hidden">
+        <div className="p-5 border-b bg-slate-50/50 flex justify-between font-black text-slate-700"><h3>歷史紀錄</h3><span>共 {data.entries.length} 筆</span></div>
+        <div className="max-h-[300px] overflow-y-auto divide-y divide-slate-50">
+          {[...data.entries].sort((a,b)=>b.date.localeCompare(a.date)).map((e:any)=>(
+            <div key={e.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
+              <div className="flex items-center gap-6"><span className="text-sm font-bold text-slate-400 min-w-[80px]">{e.date}</span><span className="text-lg font-black text-slate-700 min-w-[70px]">{e.weight} kg</span>{e.bodyFat&&<span className="text-sm font-bold text-slate-400">{e.bodyFat}%</span>}{e.photo&&<ImageIcon size={14} className="text-teal-500"/>}</div>
+              <div className="flex gap-2"><button onClick={()=>onUpdate({...data, entries:data.entries.filter((x:any)=>x.id!==e.id)})}><Trash2 size={16} className="text-slate-300 hover:text-red-500"/></button></div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
 
+const BodyAnalysisView = ({ data }: any) => {
+  const [startDate, setStartDate] = useState('2025-12-02');
+  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const photoEntries = useMemo(() => data.entries.filter((e:any)=>e.date>=startDate && e.date<=endDate && e.photo).sort((a:any,b:any)=>a.date.localeCompare(b.date)), [data.entries, startDate, endDate]);
+  const weightChange = useMemo(() => {
+    const all = data.entries.filter((e:any)=>e.date>=startDate && e.date<=endDate).sort((a:any,b:any)=>a.date.localeCompare(b.date));
+    return all.length < 2 ? 0 : (all[all.length-1].weight - all[0].weight).toFixed(1);
+  }, [data.entries, startDate, endDate]);
+  return (
+    <div className="space-y-6 pb-24">
+      <div className="bg-white p-4 rounded-[1.5rem] shadow-sm border flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-2xl border"><CalendarIcon size={18} className="text-slate-400"/><input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} className="bg-transparent font-bold text-sm outline-none"/><span className="text-slate-300">至</span><input type="date" value={endDate} onChange={e=>setEndDate(e.target.value)} className="bg-transparent font-bold text-sm outline-none"/></div>
+        <div className="bg-slate-50 px-5 py-3 rounded-2xl border flex items-center gap-4"><span className="text-xs font-black text-slate-400">區間變化</span><span className={`text-xl font-black ${Number(weightChange)<=0?'text-[#1a9478]':'text-red-500'}`}>{Number(weightChange)>0?'+':''}{weightChange} kg</span></div>
+      </div>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-        {filteredEntries.map(entry => (
-          <div key={entry.id} className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden flex flex-col relative group">
-             <div className="aspect-square bg-slate-100 relative">
-               <img src={entry.photo} alt={entry.date} className="w-full h-full object-cover" />
-               <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-3 pt-10">
-                 <div className="flex justify-between items-end">
-                   <div>
-                       <div className="text-white/90 text-xs font-medium mb-0.5">{entry.date}</div>
-                       <div className="text-white font-bold text-xl">{entry.weight} <span className="text-xs font-normal opacity-80">kg</span></div>
-                   </div>
-                   {entry.bodyFat && <div className="text-white/90 text-sm font-medium bg-white/20 backdrop-blur-md px-2 py-1 rounded-lg">{entry.bodyFat}%</div>}
-                 </div>
-               </div>
-             </div>
+        {photoEntries.map((e:any)=>(
+          <div key={e.id} className="relative aspect-[3/4] rounded-3xl overflow-hidden shadow-md group"><img src={e.photo} className="w-full h-full object-cover transition-transform group-hover:scale-110" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent flex flex-col justify-end p-4"><div className="text-[10px] text-white/70">{e.date}</div><div className="flex items-end justify-between text-white"><div className="flex items-baseline gap-1"><span className="text-2xl font-black">{e.weight}</span><span className="text-[10px]">kg</span></div>{e.bodyFat&&<div className="bg-white/20 px-2 py-1 rounded-lg text-[10px]">{e.bodyFat}%</div>}</div></div>
           </div>
         ))}
-        {filteredEntries.length === 0 && <div className="col-span-full text-center py-10 text-slate-400">此區間無照片紀錄</div>}
       </div>
     </div>
   );
 };
 
-// --- 頁面元件：肌力訓練 ---
-const StrengthTrainingView = ({ data, onUpdate }: { data: UserData, onUpdate: (newData: UserData) => void }) => {
-  const [filterMuscle, setFilterMuscle] = useState<MuscleGroup | '全部'>('全部');
-  const [isAddingExercise, setIsAddingExercise] = useState(false);
-  const [modalConfig, setModalConfig] = useState<{ isOpen: boolean; message: string; action: () => void; isDestructive: boolean; }>({ isOpen: false, message: '', action: () => {}, isDestructive: false });
-  const [newExName, setNewExName] = useState('');
-  const [newExMuscle, setNewExMuscle] = useState<MuscleGroup>('胸');
-  const [newExType, setNewExType] = useState<EquipmentType>('槓鈴');
-
-  const handleAddExercise = () => {
-    if (!newExName) return;
-    onUpdate({ ...data, exercises: [...data.exercises, { id: Date.now().toString(), name: newExName, muscle: newExMuscle, type: newExType }] });
-    setNewExName(''); setIsAddingExercise(false);
+const StrengthLogView = ({ data, onUpdate }: any) => {
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [isCopy, setIsCopy] = useState(false); const [isAddEx, setIsAddEx] = useState(false); const [isLib, setIsLib] = useState(false);
+  const [muscle, setMuscle] = useState<any>('胸'); const [exId, setExId] = useState('');
+  const [newEx, setNewEx] = useState({ name: '', tool: '槓鈴', unit: 'kg' });
+  const currentPlan = data.dailyPlans?.[date] || '';
+  const todaysLogs = data.logs.filter((l:any)=>l.date===date);
+  const todaysEx = useMemo(()=>Array.from(new Set(todaysLogs.map((l:any)=>l.exerciseId))).map(id=>data.exercises.find((e:any)=>e.id===id)).filter(Boolean), [todaysLogs, data.exercises]);
+  const addLog = (eid:string, afterId?:string) => {
+    const ex = data.exercises.find((e:any)=>e.id===eid); const last = data.logs.filter((l:any)=>l.exerciseId===eid).slice(-1)[0];
+    const nLog:any = { id:Math.random().toString(36).substr(2,9), exerciseId:eid, date, weight:last?last.weight:0, reps:last?last.reps:8, originalWeight:last?last.originalWeight:0, originalUnit:last?last.originalUnit:(ex?.defaultUnit||'kg') };
+    if (afterId) { const idx=data.logs.findIndex((l:any)=>l.id===afterId); const nl=[...data.logs]; nl.splice(idx+1,0,nLog); onUpdate({...data, logs:nl}); } else onUpdate({...data, logs:[...data.logs, nLog]});
   };
-
-  const handleAddLog = (exerciseId: string, date: string, weight: number, reps: number, unit: WeightUnit) => {
-    const weightKg = unit === 'kg' ? weight : lbsToKg(weight);
-    onUpdate({ ...data, logs: [...data.logs, { id: Date.now().toString() + Math.random(), exerciseId, date, weight: parseFloat(weightKg.toFixed(2)), reps, originalWeight: weight, originalUnit: unit }] });
-  };
-
-  const handleUpdateLog = (logId: string, date: string, weight: number, reps: number, unit: WeightUnit) => {
-    const weightKg = unit === 'kg' ? weight : lbsToKg(weight);
-    onUpdate({ ...data, logs: data.logs.map(log => log.id === logId ? { ...log, date, originalWeight: weight, reps, originalUnit: unit, weight: parseFloat(weightKg.toFixed(2)) } : log) });
-  };
-
-  const handleDeleteLog = (logId: string) => {
-    setModalConfig({ isOpen: true, message: '確定要刪除這筆訓練紀錄嗎？', isDestructive: true, action: () => { onUpdate({ ...data, logs: data.logs.filter(l => l.id !== logId) }); setModalConfig(prev => ({ ...prev, isOpen: false })); } });
-  };
-
-  const filteredExercises = data.exercises.filter(ex => filterMuscle === '全部' || ex.muscle === filterMuscle);
-
   return (
     <div className="space-y-6 pb-20">
-       <ConfirmModal isOpen={modalConfig.isOpen} message={modalConfig.message} onConfirm={modalConfig.action} onCancel={() => setModalConfig(prev => ({ ...prev, isOpen: false }))} isDestructive={modalConfig.isDestructive} />
-       <div className="flex flex-col gap-4 bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-         <div className="flex justify-between items-center">
-            <h2 className="font-bold text-slate-700 flex items-center gap-2"><Dumbbell size={20}/> 動作管理</h2>
-            <button onClick={() => setIsAddingExercise(!isAddingExercise)} className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-sm flex items-center gap-1 transition-transform active:scale-95"><Plus size={16}/> 新增</button>
-         </div>
-         {isAddingExercise && (
-           <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 grid grid-cols-1 md:grid-cols-4 gap-3 animate-in slide-in-from-top-2">
-              <input placeholder="動作名稱" value={newExName} onChange={e => setNewExName(e.target.value)} className="md:col-span-2 px-3 py-2 border rounded text-sm outline-none" />
-              <select value={newExMuscle} onChange={e => setNewExMuscle(e.target.value as MuscleGroup)} className="px-3 py-2 border rounded text-sm outline-none bg-white"><option value="胸">胸部</option><option value="肩">肩膀</option><option value="背">背部</option></select>
-              <select value={newExType} onChange={e => setNewExType(e.target.value as EquipmentType)} className="px-3 py-2 border rounded text-sm outline-none bg-white"><option value="槓鈴">槓鈴</option><option value="啞鈴">啞鈴</option><option value="自體重">自體重</option></select>
-              <button onClick={handleAddExercise} className="w-full bg-slate-800 text-white py-2 rounded text-sm font-medium">確認</button>
-           </div>
-         )}
-         <div className="flex gap-2 overflow-x-auto pb-1">{['全部', '胸', '背', '肩'].map(m => (<button key={m} onClick={() => setFilterMuscle(m as any)} className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${filterMuscle === m ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'}`}>{m}</button>))}</div>
-       </div>
-       <div className="space-y-4">{filteredExercises.map(ex => (<ExerciseCard key={ex.id} exercise={ex} logs={data.logs.filter(l => l.exerciseId === ex.id)} onAddLog={handleAddLog} onDeleteLog={handleDeleteLog} onUpdateLog={handleUpdateLog} />))}</div>
-    </div>
-  );
-};
-
-const ExerciseCard = ({ exercise, logs, onAddLog, onDeleteLog, onUpdateLog }: { exercise: Exercise, logs: TrainingLog[], onAddLog: any, onDeleteLog: any, onUpdateLog: any }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [logDate, setLogDate] = useState(new Date().toISOString().split('T')[0]);
-  const [logWeight, setLogWeight] = useState('');
-  const [logReps, setLogReps] = useState('5');
-  const [logUnit, setLogUnit] = useState<WeightUnit>('kg');
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDate, setEditDate] = useState('');
-  const [editWeight, setEditWeight] = useState('');
-  const [editReps, setEditReps] = useState('');
-  const [editUnit, setEditUnit] = useState<WeightUnit>('kg');
-
-  const chartData = useMemo(() => {
-    const dailyStats: { [key: string]: { actual: number, oneRM: number } } = {};
-    logs.forEach(log => {
-      const currentOneRM = calculate1RM(log.weight, log.reps || 1);
-      if (!dailyStats[log.date]) { dailyStats[log.date] = { actual: log.weight, oneRM: currentOneRM }; } 
-      else { if (log.weight > dailyStats[log.date].actual) dailyStats[log.date].actual = log.weight; if (currentOneRM > dailyStats[log.date].oneRM) dailyStats[log.date].oneRM = currentOneRM; }
-    });
-    return Object.keys(dailyStats).sort((a,b)=>new Date(a).getTime()-new Date(b).getTime()).map(date => ({ date, actual: parseFloat(dailyStats[date].actual.toFixed(1)), oneRM: parseFloat(dailyStats[date].oneRM.toFixed(1)) }));
-  }, [logs]);
-
-  const actualMax = logs.length > 0 ? Math.max(...logs.map(l=>l.weight)) : 0;
-  const max1RM = logs.length > 0 ? Math.max(...logs.map(l=>calculate1RM(l.weight, l.reps||1))) : 0;
-  
-  const convertedDisplay = useMemo(() => {
-    const val = parseFloat(logWeight);
-    if (isNaN(val)) return '';
-    return logUnit === 'kg' ? `≈ ${(val * 2.20462).toFixed(1)} lbs` : `≈ ${(val / 2.20462).toFixed(1)} kg`;
-  }, [logWeight, logUnit]);
-
-  const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); if(!logWeight) return; onAddLog(exercise.id, logDate, parseFloat(logWeight), parseInt(logReps), logUnit); setLogWeight(''); };
-  const startEdit = (log: TrainingLog) => { setEditingId(log.id); setEditDate(log.date); setEditWeight(log.originalWeight.toString()); setEditReps(log.reps.toString()); setEditUnit(log.originalUnit); };
-  const saveEdit = () => { if(editingId && editWeight) { onUpdateLog(editingId, editDate, parseFloat(editWeight), parseInt(editReps), editUnit); setEditingId(null); } };
-  const copyLog = (log: TrainingLog) => { setLogDate(log.date); setLogWeight(log.originalWeight.toString()); setLogReps((log.reps||1).toString()); setLogUnit(log.originalUnit); };
-
-  return (
-    <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden transition-all duration-300">
-      <div className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-50" onClick={()=>setIsExpanded(!isExpanded)}>
-        <div className="flex items-center gap-3"><div className={`p-2 rounded-lg ${exercise.muscle === '胸' ? 'bg-rose-100 text-rose-600' : exercise.muscle === '背' ? 'bg-blue-100 text-blue-600' : 'bg-amber-100 text-amber-600'}`}><Dumbbell size={20}/></div><div><h3 className="font-bold text-slate-800">{exercise.name}</h3><div className="text-[10px] text-slate-400">{exercise.type}</div></div></div>
-        <div className="flex items-center gap-4"><div className="text-right flex flex-col gap-1"><div className="text-[10px] text-slate-400">實際最大: <strong className="text-slate-700">{actualMax}kg</strong></div><div className="text-[10px] text-indigo-400">預估 1RM: <strong className="font-bold">{max1RM.toFixed(1)}kg</strong></div></div>{isExpanded ? <ChevronUp size={20} className="text-slate-300"/> : <ChevronDown size={20} className="text-slate-300"/>}</div>
-      </div>
-      {isExpanded && (
-        <div className="border-t p-4 bg-slate-50/50 space-y-4">
-          {chartData.length > 0 && (
-            <div className="h-56 w-full bg-white p-2 rounded-xl border border-slate-200">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <CartesianGrid stroke="#f1f5f9" strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="date" tickFormatter={(str) => str.slice(5)} stroke="#94a3b8" fontSize={10} />
-                  <YAxis domain={['auto', 'auto']} stroke="#94a3b8" fontSize={10} />
-                  <Tooltip labelStyle={{fontSize: '12px'}} itemStyle={{fontSize: '12px'}} />
-                  <Legend wrapperStyle={{fontSize: '10px', paddingTop: '10px'}} />
-                  <Line name="實際最大重量" type="monotone" dataKey="actual" stroke="#1e293b" strokeWidth={2} dot={{r: 3}} />
-                  <Line name="預估 1RM" type="monotone" dataKey="oneRM" stroke="#6366f1" strokeWidth={2} strokeDasharray="5 5" dot={{r: 2}} />
-                </LineChart>
-              </ResponsiveContainer>
-              <div className="text-[10px] text-center text-slate-400 mt-2 flex items-center justify-center gap-1"><ChartIcon size={10}/> 動作重量進度趨勢</div>
+      <CopyWorkoutModal isOpen={isCopy} onClose={()=>setIsCopy(false)} data={data} onCopy={(sd:string)=>{const sp=data.dailyPlans[sd]; const nl=data.logs.filter((l:any)=>l.date===sd).map((l:any)=>({...l, id:Math.random().toString(36).substr(2,9), date})); onUpdate({...data, dailyPlans:{...data.dailyPlans, [date]:sp}, logs:[...data.logs.filter((l:any)=>l.date!==date), ...nl]});}} />
+      <ExerciseLibraryModal isOpen={isLib} onClose={()=>setIsLib(false)} data={data} onUpdate={onUpdate} />
+      <div className="bg-white p-4 rounded-2xl border flex items-center justify-between shadow-sm"><div className="flex items-center gap-2"><CalendarIcon size={20} className="text-slate-400"/><input type="date" value={date} onChange={e=>setDate(e.target.value)} className="font-bold outline-none text-slate-700"/></div>{currentPlan&&<button onClick={()=>onUpdate({...data, dailyPlans:{...data.dailyPlans,[date]:''}})} className="text-xs bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full font-bold">重選</button>}</div>
+      {!currentPlan ? (
+        <div className="bg-white p-8 rounded-[2.5rem] border-2 border-dashed text-center space-y-6">
+          <ClipboardList size={32} className="mx-auto text-indigo-600"/><h3 className="text-xl font-black">今天打算練什麼？</h3>
+          <div className="flex flex-wrap justify-center gap-2">{(data.planTemplates||[]).map((t:any)=>(<button key={t} onClick={()=>onUpdate({...data, dailyPlans:{...data.dailyPlans,[date]:t}})} className="px-4 py-2 bg-slate-100 rounded-xl text-sm font-bold hover:bg-indigo-600 hover:text-white transition-all">{t}</button>))}</div>
+          <div className="pt-4 border-t space-y-3"><button onClick={()=>setIsCopy(true)} className="w-full py-3 bg-indigo-50 text-indigo-600 rounded-2xl font-black flex items-center justify-center gap-2"><History size={18}/> 從行事曆複製課表</button>
+          <div className="flex gap-2"><input type="text" id="cp-input" placeholder="自定義新計畫..." className="flex-1 border rounded-xl p-3 text-sm outline-none bg-slate-50" /><button onClick={()=>{const v=(document.getElementById('cp-input') as any).value; if(v) onUpdate({...data, dailyPlans:{...data.dailyPlans,[date]:v}, planTemplates:Array.from(new Set([...(data.planTemplates||[]), v]))});}} className="bg-slate-800 text-white p-3 rounded-xl"><Check/></button></div></div>
+        </div>
+      ) : (
+        <div className="bg-slate-800 p-4 rounded-[2.5rem] shadow-xl text-white space-y-6 min-h-[400px]">
+          <h3 className="font-black text-indigo-300 text-sm uppercase flex items-center gap-2"><Activity size={16}/> {currentPlan}</h3>
+          {todaysEx.map((ex:any)=>(
+            <div key={ex.id} className="bg-slate-700/50 p-4 rounded-3xl border border-slate-600">
+              <div className="flex justify-between mb-4 font-black"><h4>{ex.name}</h4><span className="text-[10px] bg-slate-600 px-2 rounded text-slate-300">{ex.type}</span></div>
+              {todaysLogs.filter((l:any)=>l.exerciseId===ex.id).map((log:any, i:number)=>(<TrainingRow key={log.id} log={log} index={i} onUpdate={(ul:any)=>onUpdate({...data, logs:data.logs.map((l:any)=>l.id===ul.id?ul:l)})} onDelete={()=>onUpdate({...data, logs:data.logs.filter((l:any)=>l.id!==log.id)})} onDuplicate={()=>onUpdate({...data, logs:[...data.logs, {...log, id:Math.random().toString()}]})} onInsertAfter={()=>addLog(ex.id, log.id)} />))}
+              <button onClick={()=>addLog(ex.id)} className="w-full mt-2 py-2 border border-dashed border-slate-600 rounded-xl text-slate-400 text-xs font-black">+ 加一組</button>
             </div>
-          )}
-          <form onSubmit={handleSubmit} className="flex flex-wrap gap-2 items-end bg-white p-3 rounded-lg border border-slate-200">
-             <div className="w-[30%] min-w-[100px]"><label className="text-[10px] text-slate-400">日期</label><input type="date" value={logDate} onChange={e => setLogDate(e.target.value)} className="w-full text-xs py-1 border-b" /></div>
-             <div className="w-[20%]"><label className="text-[10px] text-slate-400">重量</label><input id={`input-weight-${exercise.id}`} type="number" step="0.1" value={logWeight} onChange={e => setLogWeight(e.target.value)} placeholder="0" className="w-full text-xs py-1 border-b" /></div>
-             <div className="w-[15%]"><label className="text-[10px] text-slate-400">次數</label><input type="number" value={logReps} onChange={e => setLogReps(e.target.value)} placeholder="5" className="w-full text-xs py-1 border-b" /></div>
-             <div className="w-[15%]"><label className="text-[10px] text-slate-400">單位</label><select value={logUnit} onChange={e => setLogUnit(e.target.value as WeightUnit)} className="w-full text-xs bg-transparent border-b"><option value="kg">kg</option><option value="lbs">lbs</option></select></div>
-             <button type="submit" className="flex-1 bg-indigo-600 text-white p-2 rounded-md"><Plus size={16}/></button>
-             <div className="w-full text-[10px] text-slate-400 mt-1">{convertedDisplay}</div>
-          </form>
-          <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-            {[...logs].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(log => (
-              <div key={log.id} className="flex justify-between items-center text-sm p-2 bg-white rounded border border-slate-100 group">
-                {editingId === log.id ? (
-                  <div className="flex gap-1 w-full"><input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} className="w-24 text-[10px]" /><input type="number" value={editWeight} onChange={e => setEditWeight(e.target.value)} className="w-12 text-[10px]" /><input type="number" value={editReps} onChange={e => setEditReps(e.target.value)} className="w-8 text-[10px]" /><button onClick={saveEdit} className="text-green-600 ml-auto"><Check size={14}/></button></div>
-                ) : (
-                  <><div className="flex gap-3 items-center"><span className="text-slate-500 text-[10px] w-14">{log.date.slice(5)}</span><span className="font-medium text-slate-700">{log.originalWeight} {log.originalUnit} x {log.reps}</span><span className="text-[10px] text-indigo-400 bg-indigo-50 px-1.5 rounded">1RM: {calculate1RM(log.weight, log.reps).toFixed(0)}</span></div><div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => copyLog(log)} className="text-slate-400 hover:text-indigo-600 p-1"><Copy size={12}/></button><button onClick={() => startEdit(log)} className="text-slate-400 hover:text-indigo-600 p-1"><Edit2 size={12}/></button><button onClick={() => onDeleteLog(log.id)} className="text-slate-400 hover:text-red-500 p-1"><Trash2 size={12}/></button></div></>
-                )}
+          ))}
+          <div className="pt-6 border-t border-slate-700 space-y-4">
+            <div className="flex gap-2 overflow-x-auto pb-1">{['胸','背','肩','腿'].map((m:any)=>(<button key={m} onClick={()=>setMuscle(m)} className={`px-4 py-1.5 rounded-xl text-xs font-black transition-all ${muscle===m?'bg-indigo-500 text-white shadow-lg':'bg-slate-700 text-slate-400'}`}>{m}</button>))}</div>
+            <div className="flex gap-2">
+              <select value={exId} onChange={e=>e.target.value==='new'?setIsAddEx(true):setExId(e.target.value)} className="flex-1 bg-slate-900 border border-slate-600 rounded-2xl p-3 text-sm text-white outline-none">
+                <option value="">-- 選擇動作 --</option>{data.exercises.filter((e:any)=>e.muscle===muscle && e.isTracked!==false).map((e:any)=><option key={e.id} value={e.id}>{e.name} ({e.type})</option>)}<option value="new">+ 建立新動作</option>
+              </select>
+              <button onClick={()=>setIsLib(true)} className="bg-slate-700 text-slate-300 px-3 rounded-2xl"><BookOpen size={20}/></button>
+              <button onClick={()=>{if(!exId)return; addLog(exId); setExId('');}} className="bg-indigo-600 text-white px-5 rounded-2xl active:scale-90"><Plus/></button>
+            </div>
+            {isAddEx && (
+              <div className="bg-slate-900 p-5 rounded-3xl border border-slate-600 space-y-4 shadow-2xl">
+                <div className="flex justify-between font-black text-indigo-300"><span>建立動作</span><button onClick={()=>setIsAddEx(false)}><X/></button></div>
+                <input placeholder="名稱" value={newEx.name} onChange={e=>setNewEx({...newEx, name: e.target.value})} className="w-full bg-slate-800 border-none rounded-xl p-3 text-sm text-white outline-none" />
+                <div className="grid grid-cols-2 gap-3">
+                  <select value={newEx.tool} onChange={e=>setNewEx({...newEx, tool: e.target.value})} className="bg-slate-800 text-xs text-white p-2 rounded-lg">{['啞鈴','槓鈴','W槓','繩索','器械','自體重'].map(t=><option key={t} value={t}>{t}</option>)}</select>
+                  <select value={newEx.unit} onChange={e=>setNewEx({...newEx, unit: e.target.value as any})} className="bg-slate-800 text-xs text-white p-2 rounded-lg"><option value="kg">KG</option><option value="lbs">LBS</option></select>
+                </div>
+                <button onClick={()=>{if(!newEx.name)return; const ne:any={id:Date.now().toString(), name:newEx.name, muscle, type:newEx.tool, isTracked:true, defaultUnit:newEx.unit}; onUpdate({...data, exercises:[...data.exercises, ne]}); setIsAddEx(false); setExId(ne.id);}} className="w-full bg-indigo-500 text-white py-3 rounded-2xl font-black">建立並選取</button>
               </div>
-            ))}
+            )}
           </div>
         </div>
       )}
@@ -678,134 +409,92 @@ const ExerciseCard = ({ exercise, logs, onAddLog, onDeleteLog, onUpdateLog }: { 
   );
 };
 
-// --- 主程式 ---
-const BodyGoalPro = () => {
-  const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'body' | 'strength' | 'analysis'>('body');
-  const [userData, setUserData] = useState<UserData>(DEFAULT_DATA);
-  const [isDataLoading, setIsDataLoading] = useState(false);
-  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
-  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  // 新增：錯誤訊息狀態
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        await signInAnonymously(auth);
-      } catch (error) { 
-        console.error("Auth error:", error); 
-        setErrorMsg("登入失敗，請檢查 Firebase Console 的 Authentication 設定 (是否啟用匿名登入)");
-      }
-    };
-    initAuth();
-    return onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setLoading(false);
-    });
-  }, []);
-
-  // 2. Data Sync
-  useEffect(() => {
-    if (loading || !user) return;
-    setIsDataLoading(true);
-    // 使用固定的集合名稱 (my_data) 與文件 ID (master_sheet)
-    const docRef = doc(db, FIXED_COLLECTION, FIXED_DOC_ID);
-    const unsubscribe = onSnapshot(docRef, (docSnap) => {
-      setIsDataLoading(false);
-      setErrorMsg(null); // Clear error on success
-      if (docSnap.exists()) {
-        const rawData = docSnap.data() as Partial<UserData>;
-        setUserData({
-          goals: rawData.goals || DEFAULT_GOALS,
-          entries: rawData.entries || [],
-          exercises: rawData.exercises || [],
-          logs: rawData.logs || []
-        });
-      } else {
-        setUserData(DEFAULT_DATA);
-      }
-    }, (err) => {
-      console.error("Data sync error:", err);
-      setIsDataLoading(false);
-      // 顯示明確的錯誤原因
-      if (err.code === 'permission-denied') {
-        setErrorMsg("權限不足：請檢查 Firebase Console 的 Firestore Rules 是否設為 'allow read, write: if true;'");
-      } else {
-        setErrorMsg(`連線錯誤: ${err.message}`);
-      }
-    });
-    return () => unsubscribe();
-  }, [loading, user]);
-
-  const handleUpdateData = async (newData: UserData) => {
-    setUserData(newData);
-    try {
-      const sanitizedData = JSON.parse(JSON.stringify(newData));
-      // 使用固定的集合名稱 (my_data) 與文件 ID (master_sheet)
-      const docRef = doc(db, FIXED_COLLECTION, FIXED_DOC_ID);
-      await setDoc(docRef, sanitizedData);
-      setErrorMsg(null);
-    } catch (e: any) {
-      console.error("Save error:", e);
-      if (e.code === 'permission-denied') {
-        setErrorMsg("儲存失敗：資料庫拒絕寫入 (請檢查 Rules)");
-      } else {
-        setErrorMsg("儲存失敗，請檢查網路");
-      }
-    }
-  };
-
-  const handleResetData = async () => {
-    if(!confirm("確定要清空所有資料？此動作無法復原！")) return;
-    handleUpdateData(DEFAULT_DATA);
-  };
-
-  if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500"><Loader2 className="animate-spin mr-2"/> 載入中...</div>;
+const StrengthAnalysisView = ({ data, onManage }: any) => {
+  const [filterPlan, setFilterPlan] = useState('all'); const [filterMuscle, setFilterMuscle] = useState('all');
+  const [filterType, setFilterType] = useState('all'); const [searchTerm, setSearchTerm] = useState('');
+  const options = useMemo(() => ({ plans: Array.from(new Set(Object.values(data.dailyPlans||{}).filter(Boolean))), muscles:['胸','背','肩','腿','手','腹'], types:['槓鈴','啞鈴','W槓','繩索','器械','自體重'] }), [data]);
+  const filteredData = useMemo(() => {
+    return data.exercises.filter((ex:any) => {
+      if (filterMuscle!=='all' && ex.muscle!==filterMuscle) return false;
+      if (filterType!=='all' && ex.type!==filterType) return false;
+      if (searchTerm && !ex.name.includes(searchTerm)) return false;
+      if (ex.isTracked===false) return false;
+      if (filterPlan!=='all' && !data.logs.some((l:any)=>l.exerciseId===ex.id && data.dailyPlans[l.date]===filterPlan)) return false;
+      return true;
+    }).map((ex:any) => {
+      const logs = data.logs.filter((l:any)=>l.exerciseId===ex.id);
+      const dailyMaxMap = logs.reduce((acc:any, l:any)=>{
+        if (filterPlan!=='all' && data.dailyPlans[l.date]!==filterPlan) return acc;
+        const rm = calculate1RM(l.weight, l.reps);
+        if(!acc[l.date] || rm>acc[l.date].rm) acc[l.date] = { date:l.date, rm:parseFloat(rm.toFixed(1)) };
+        return acc;
+      }, {});
+      const chartPoints = Object.values(dailyMaxMap).sort((a:any,b:any)=>a.date.localeCompare(b.date));
+      return { ...ex, chartPoints, pr: Math.max(...(chartPoints as any[]).map(c=>c.rm), 0) };
+    }).filter((ex:any)=>ex.chartPoints.length>0);
+  }, [data, filterPlan, filterMuscle, filterType, searchTerm]);
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
-      <div className="max-w-4xl mx-auto">
-        <DataTransferModal isOpen={isExportModalOpen} type="export" data={userData} onClose={() => setIsExportModalOpen(false)} />
-        <DataTransferModal isOpen={isImportModalOpen} type="import" onImport={handleUpdateData} onClose={() => setIsImportModalOpen(false)} />
-        
-        {/* 錯誤訊息顯示列 */}
-        {errorMsg && (
-          <div className="bg-red-50 text-red-600 px-4 py-3 text-sm font-medium border-b border-red-100 flex items-center gap-2">
-            <AlertCircle size={16} className="shrink-0"/>
-            {errorMsg}
-          </div>
-        )}
-
-        <header className="bg-white p-4 sticky top-0 z-10 shadow-sm border-b border-slate-100 flex items-center justify-between">
-           <div className="flex items-center gap-3">
-             <div className={`p-2 rounded-lg text-white transition-colors ${activeTab === 'body' ? 'bg-teal-600' : 'bg-indigo-600'}`}>
-               {isDataLoading ? <Loader2 size={24} className="animate-spin"/> : <Activity size={24} />}
-             </div>
-             <div><h1 className="text-xl font-bold">BodyGoal Pro</h1><p className="text-[10px] text-slate-500">雲端資料庫 (Private)</p></div>
-           </div>
-           <div className="flex items-center gap-1">
-              <button onClick={() => setIsExportModalOpen(true)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg" title="匯出備份"><Upload size={18} /></button>
-              <button onClick={() => setIsImportModalOpen(true)} className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg" title="匯入還原"><Cloud size={18} /></button>
-              <button onClick={handleResetData} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="清空"><RefreshCw size={18} /></button>
-           </div>
-        </header>
-        <main className="p-4">
-          {activeTab === 'body' && <BodyMetricsView data={userData} onUpdate={handleUpdateData} />}
-          {activeTab === 'strength' && <StrengthTrainingView data={userData} onUpdate={handleUpdateData} />}
-          {activeTab === 'analysis' && <BodyAnalysisView data={userData} />}
-        </main>
-        <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 pb-safe">
-          <div className="max-w-4xl mx-auto flex justify-around">
-            <button onClick={() => setActiveTab('body')} className={`flex-1 py-3 flex flex-col items-center gap-1 text-[10px] font-medium transition-colors ${activeTab === 'body' ? 'text-teal-600' : 'text-slate-400 hover:text-slate-600'}`}><Ruler size={24} strokeWidth={activeTab === 'body' ? 2.5 : 2} />體態追蹤</button>
-            <button onClick={() => setActiveTab('analysis')} className={`flex-1 py-3 flex flex-col items-center gap-1 text-[10px] font-medium transition-colors ${activeTab === 'analysis' ? 'text-orange-500' : 'text-slate-400'}`}><Search size={24} strokeWidth={activeTab === 'analysis' ? 2.5 : 2} />體態分析</button>
-            <button onClick={() => setActiveTab('strength')} className={`flex-1 py-3 flex flex-col items-center gap-1 text-[10px] font-medium transition-colors ${activeTab === 'strength' ? 'text-indigo-600' : 'text-slate-400'}`}><Dumbbell size={24} strokeWidth={activeTab === 'strength' ? 2.5 : 2} />肌力訓練</button>
-          </div>
-        </nav>
+    <div className="space-y-6 pb-24">
+      <div className="bg-white p-5 rounded-[1.5rem] shadow-sm border border-slate-100 flex flex-col gap-4">
+        <div className="flex items-center justify-between"><h3 className="font-black text-slate-700 flex items-center gap-2"><ChartIcon size={18} className="text-teal-600"/> 訓練表現分析</h3>{(filterPlan!=='all'||filterMuscle!=='all'||filterType!=='all'||searchTerm)&&(<button onClick={()=>{setFilterPlan('all');setFilterMuscle('all');setFilterType('all');setSearchTerm('')}} className="text-xs font-bold text-red-400 bg-red-50 px-3 py-1.5 rounded-full">清除篩選</button>)}</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <div className="relative"><select value={filterPlan} onChange={e=>setFilterPlan(e.target.value)} className="w-full bg-slate-50 border border-slate-200 text-slate-600 text-xs font-bold rounded-xl p-3 outline-none appearance-none"><option value="all">所有訓練計畫</option>{options.plans.map((p:any)=><option key={p} value={p}>{p}</option>)}</select><ChevronDown size={14} className="absolute right-3 top-3.5 text-slate-400 pointer-events-none"/></div>
+          <div className="relative"><select value={filterMuscle} onChange={e=>setFilterMuscle(e.target.value)} className="w-full bg-slate-50 border border-slate-200 text-slate-600 text-xs font-bold rounded-xl p-3 outline-none appearance-none"><option value="all">所有部位</option>{options.muscles.map(m=><option key={m} value={m}>{m}</option>)}</select><ChevronDown size={14} className="absolute right-3 top-3.5 text-slate-400 pointer-events-none"/></div>
+          <div className="relative"><select value={filterType} onChange={e=>setFilterType(e.target.value)} className="w-full bg-slate-50 border border-slate-200 text-slate-600 text-xs font-bold rounded-xl p-3 outline-none appearance-none"><option value="all">所有器材</option>{options.types.map(t=><option key={t} value={t}>{t}</option>)}</select><ChevronDown size={14} className="absolute right-3 top-3.5 text-slate-400 pointer-events-none"/></div>
+          <div className="relative"><input type="text" placeholder="搜尋動作..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full bg-slate-50 border border-slate-200 text-slate-600 text-xs font-bold rounded-xl p-3 outline-none pl-8"/><Search size={14} className="absolute left-3 top-3.5 text-slate-400"/></div>
+        </div>
       </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {filteredData.map((ex:any)=>(
+          <div key={ex.id} className="bg-white p-5 rounded-[1.5rem] border border-slate-100 shadow-sm hover:shadow-md transition-shadow relative group">
+            <div className="flex justify-between items-start mb-4"><div><h3 className="font-black text-slate-800 text-lg">{ex.name}</h3><div className="flex gap-2 mt-1"><span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md font-bold">{ex.muscle}</span><span className="text-[10px] bg-indigo-50 text-indigo-500 px-2 py-0.5 rounded-md font-bold">{ex.type}</span></div></div><div className="text-right"><div className="text-[10px] text-slate-400 font-bold uppercase">歷史 PR</div><div className="text-2xl font-black text-indigo-600">{ex.pr} <span className="text-sm text-slate-400">kg</span></div></div></div>
+            <button onClick={() => onManage(ex.id)} className="absolute top-5 right-1/2 translate-x-1/2 bg-slate-100 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 px-3 py-1 rounded-full text-[10px] font-bold opacity-0 group-hover:opacity-100 transition-all shadow-sm"><Edit2 size={12} className="inline mr-1"/> 管理數據</button>
+            <div className="h-40 w-full"><ResponsiveContainer width="100%" height="100%"><LineChart data={ex.chartPoints}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/><XAxis dataKey="date" tickFormatter={s=>s.slice(5)} fontSize={10}/><Tooltip labelFormatter={(l)=>'日期: '+l} formatter={(v)=>[v+' kg', '當日最高 1RM']} contentStyle={{borderRadius:'12px', border:'none', boxShadow:'0 10px 15px -3px rgba(0,0,0,0.1)', fontSize:'12px', fontWeight:'bold'}}/><Line type="monotone" dataKey="rm" stroke="#6366f1" strokeWidth={3} dot={{r:3, fill:'#6366f1', strokeWidth:0}} activeDot={{r:5}}/></LineChart></ResponsiveContainer></div><p className="text-[10px] text-center text-slate-300 font-bold mt-2">1RM 估算趨勢 (當日最高表現)</p>
+          </div>
+        ))}
+      </div>
+      {filteredData.length===0 && <div className="text-center py-20"><div className="bg-slate-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300"><ChartIcon size={32}/></div><p className="text-slate-400 font-bold">沒有符合篩選條件的數據</p></div>}
     </div>
   );
 };
 
+const BodyGoalPro = () => {
+  const [loading, setLoading] = useState(true); const [user, setUser] = useState<any>(null);
+  const [activeTab, setActiveTab] = useState<'body' | 'log' | 'analysis' | 'strength_analysis'>('log');
+  const [userData, setUserData] = useState<any>(DEFAULT_DATA);
+  const [isDataLoading, setIsDataLoading] = useState(false);
+  const [isExportOpen, setIsExportOpen] = useState(false); const [isImportOpen, setIsImportOpen] = useState(false);
+  const [manageExId, setManageExId] = useState<string | null>(null);
+  useEffect(() => { signInAnonymously(auth).then(() => onAuthStateChanged(auth, (u) => { if(u) setUser(u); setLoading(false); })); }, []);
+  useEffect(() => {
+    if (loading || !user) return; setIsDataLoading(true);
+    const unsub = onSnapshot(doc(db, 'my_data', FIXED_DOC), (snap) => {
+      setIsDataLoading(false); if (snap.exists()) {
+        const d = snap.data(); setUserData({ goals: d.goals || DEFAULT_DATA.goals, entries: d.entries || [], exercises: d.exercises || [], logs: d.logs || [], dailyPlans: d.dailyPlans || {}, planTemplates: d.planTemplates || [] });
+      } else { setUserData(DEFAULT_DATA); }
+    }); return () => unsub();
+  }, [loading, user]);
+  const update = async (newData: any) => { setUserData(newData); try { await setDoc(doc(db, 'my_data', FIXED_DOC), JSON.parse(JSON.stringify(newData))); } catch(e) { console.error(e); } };
+  if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-400 font-black"><Loader2 className="animate-spin mr-2"/> SYNCING...</div>;
+  return (
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
+      <DataTransferModal isOpen={isExportOpen} type="export" data={userData} onClose={()=>setIsExportOpen(false)} />
+      <DataTransferModal isOpen={isImportOpen} type="import" onImport={update} onClose={()=>setIsImportOpen(false)} />
+      <HistoryManagementModal isOpen={!!manageExId} targetId={manageExId} onClose={()=>setManageExId(null)} data={userData} onUpdate={update} />
+      <header className="bg-white p-4 sticky top-0 z-50 shadow-sm border-b flex items-center justify-between">
+        <div className="flex items-center gap-3"><div className={`p-2 rounded-2xl bg-indigo-600 text-white shadow-lg`}><Activity size={20}/></div>
+          <div><h1 className="text-lg font-black tracking-tighter text-slate-800 uppercase">BODYGOAL PRO</h1><p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">Fitness Cloud</p></div></div>
+        <div className="flex gap-1"><button onClick={()=>setIsExportOpen(true)} className="p-2 text-indigo-600"><Upload size={18}/></button><button onClick={()=>setIsImportOpen(true)} className="p-2 text-emerald-600"><Cloud size={18}/></button><button onClick={()=>{if(confirm("重設？")) update(DEFAULT_DATA);}} className="p-2 text-red-400"><RefreshCw size={18}/></button></div>
+      </header>
+      <main className="p-4">{activeTab === 'body' && <BodyMetricsView data={userData} onUpdate={update} />}{activeTab === 'log' && <StrengthLogView data={userData} onUpdate={update} />}{activeTab === 'analysis' && <BodyAnalysisView data={userData} />}{activeTab === 'strength_analysis' && <StrengthAnalysisView data={userData} onManage={setManageExId} />}</main>
+      <nav className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-xl border-t pb-safe z-50 flex justify-around shadow-2xl">
+        <button onClick={()=>setActiveTab('body')} className={`flex-1 py-4 flex flex-col items-center text-[10px] font-black ${activeTab==='body'?'text-teal-600 scale-110':'text-slate-400'}`}><Ruler size={22} strokeWidth={3}/><span className="mt-1">體態紀錄</span></button>
+        <button onClick={()=>setActiveTab('analysis')} className={`flex-1 py-4 flex flex-col items-center text-[10px] font-black ${activeTab==='analysis'?'text-orange-500 scale-110':'text-slate-400'}`}><ImageIcon size={22} strokeWidth={3}/><span className="mt-1">體態分析</span></button>
+        <button onClick={()=>setActiveTab('log')} className={`flex-1 py-4 flex flex-col items-center text-[10px] font-black ${activeTab==='log'?'text-indigo-600 scale-110':'text-slate-400'}`}><Dumbbell size={22} strokeWidth={3}/><span className="mt-1">訓練計畫</span></button>
+        <button onClick={()=>setActiveTab('strength_analysis')} className={`flex-1 py-4 flex flex-col items-center text-[10px] font-black ${activeTab==='strength_analysis'?'text-violet-600 scale-110':'text-slate-400'}`}><ChartIcon size={22} strokeWidth={3}/><span className="mt-1">訓練分析</span></button>
+      </nav>
+    </div>
+  );
+};
 export default BodyGoalPro;
