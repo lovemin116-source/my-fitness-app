@@ -161,7 +161,7 @@ const ExerciseLibraryModal = ({ isOpen, onClose, data, onUpdate }: any) => {
   return (
     <div className="fixed inset-0 bg-black/70 z-[9999] flex items-center justify-center p-4 backdrop-blur-md">
       <div className="bg-white rounded-[2.5rem] w-full max-w-lg p-6 shadow-2xl flex flex-col max-h-[85vh]">
-        <div className="flex justify-between items-center mb-6"><h3 className="font-black text-xl flex items-center gap-2"><BookOpen className="text-indigo-600"/> 動作庫</h3><button onClick={onClose} className="p-2 bg-slate-100 rounded-full text-slate-400"><X size={20}/></button></div>
+        <div className="flex justify-between items-center mb-6"><h3 className="font-black text-xl flex items-center gap-2"><BookOpen className="text-indigo-600"/> 動作庫</h3><button onClick={onClose}><X size={20}/></button></div>
         <div className="flex gap-2 overflow-x-auto pb-2 mb-2 no-scrollbar">{['胸', '背', '肩', '腿', '手', '腹'].map(m => (<button key={m} onClick={() => setFilterMuscle(m)} className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${filterMuscle === m ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-100 text-slate-400'}`}>{m}</button>))}</div>
         <div className="flex-1 overflow-y-auto space-y-3 pr-1">
           {data.exercises.filter((e: any) => e.muscle === filterMuscle).map((ex: any) => (
@@ -271,13 +271,27 @@ const StrengthLogView = ({ data, onUpdate }: any) => {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [isCopy, setIsCopy] = useState(false); const [isAddEx, setIsAddEx] = useState(false); const [isLib, setIsLib] = useState(false); const [isTimerOpen, setIsTimerOpen] = useState(false);
   const [muscle, setMuscle] = useState<any>('胸'); const [exId, setExId] = useState('');
-  
-  // 修改：newEx 加入 muscle 欄位
   const [newEx, setNewEx] = useState({ name: '', tool: '槓鈴', unit: 'kg', muscle: '胸' });
   
   const currentPlan = data.dailyPlans?.[date] || '';
   const todaysLogs = data.logs.filter((l:any)=>l.date===date);
   const todaysEx = useMemo(()=>Array.from(new Set(todaysLogs.map((l:any)=>l.exerciseId))).map(id=>data.exercises.find((e:any)=>e.id===id)).filter(Boolean), [todaysLogs, data.exercises]);
+
+  // --- 優化點：監聽今日紀錄，自動同步部位篩選器 ---
+  useEffect(() => {
+    if (todaysLogs.length > 0) {
+      const lastLog = todaysLogs[todaysLogs.length - 1];
+      const lastEx = data.exercises.find((e: any) => e.id === lastLog.exerciseId);
+      if (lastEx && lastEx.muscle !== muscle) {
+        setMuscle(lastEx.muscle);
+      }
+    }
+  }, [todaysLogs.length]); // 當紀錄筆數增加時觸發
+
+  // 確保建立動作時的預設部位跟隨當前篩選
+  useEffect(() => {
+    setNewEx(prev => ({ ...prev, muscle: muscle }));
+  }, [muscle]);
   
   const handleRowComplete = (logId: string) => {
     const updated = data.logs.map((l:any) => l.id === logId ? { ...l, isCompleted: !l.isCompleted } : l);
@@ -315,7 +329,7 @@ const StrengthLogView = ({ data, onUpdate }: any) => {
               {['胸','背','肩','腿','手','腹'].map(m=>(<button key={m} onClick={()=>setMuscle(m)} className={`px-4 py-1.5 rounded-xl text-xs font-black transition-all ${muscle===m?'bg-indigo-500 text-white shadow-lg':'bg-slate-700 text-slate-400'}`}>{m}</button>))}
             </div>
             <div className="flex gap-2">
-              <select value={exId} onChange={e=>{ if(e.target.value==='new'){setIsAddEx(true); setNewEx({...newEx, muscle: muscle});} else setExId(e.target.value); }} className="flex-1 bg-slate-900 border border-slate-600 rounded-2xl p-3 text-sm text-white outline-none">
+              <select value={exId} onChange={e=>{ if(e.target.value==='new'){setIsAddEx(true);} else setExId(e.target.value); }} className="flex-1 bg-slate-900 border border-slate-600 rounded-2xl p-3 text-sm text-white outline-none">
                 <option value="">-- 選擇動作 ({muscle}) --</option>
                 {data.exercises.filter((e:any)=>e.muscle===muscle && e.isTracked!==false).map((e:any)=><option key={e.id} value={e.id}>{e.name}</option>)}
                 <option value="new">+ 建立新動作</option>
@@ -324,26 +338,20 @@ const StrengthLogView = ({ data, onUpdate }: any) => {
               <button onClick={()=>{if(!exId)return; onUpdate({...data, logs:[...data.logs, {id:Math.random().toString(), exerciseId:exId, date, weight:0, reps:8, originalWeight:0, originalUnit:'kg', isCompleted:false}]}); setExId('');}} className="bg-indigo-600 text-white px-5 rounded-2xl active:scale-90"><Plus/></button>
             </div>
             
-            {/* --- 優化後的建立動作表單：加入部位選擇 --- */}
             {isAddEx && (
               <div className="bg-slate-900 p-5 rounded-3xl border border-slate-600 space-y-4 shadow-2xl">
                 <div className="flex justify-between font-black text-indigo-300"><span>建立新動作</span><button onClick={()=>setIsAddEx(false)}><X/></button></div>
-                
-                {/* 部位選擇器 */}
                 <div className="flex flex-col gap-2">
                   <span className="text-[10px] text-slate-500 font-bold ml-1">選擇肌群分類</span>
                   <select value={newEx.muscle} onChange={e=>setNewEx({...newEx, muscle: e.target.value})} className="w-full bg-slate-800 border-none rounded-xl p-3 text-sm text-white outline-none">
                     {['胸','背','肩','腿','手','腹'].map(m=><option key={m} value={m}>{m}</option>)}
                   </select>
                 </div>
-
                 <input placeholder="動作名稱" value={newEx.name} onChange={e=>setNewEx({...newEx, name: e.target.value})} className="w-full bg-slate-800 border-none rounded-xl p-3 text-sm text-white outline-none" />
-                
                 <div className="grid grid-cols-2 gap-3">
                   <select value={newEx.tool} onChange={e=>setNewEx({...newEx, tool: e.target.value})} className="bg-slate-800 text-xs text-white p-2 rounded-lg">{['啞鈴','槓鈴','W槓','繩索','器械','自體重'].map(t=><option key={t} value={t}>{t}</option>)}</select>
                   <select value={newEx.unit} onChange={e=>setNewEx({...newEx, unit: e.target.value as any})} className="bg-slate-800 text-xs text-white p-2 rounded-lg"><option value="kg">預設: KG</option><option value="lbs">預設: LBS</option></select>
                 </div>
-                
                 <button onClick={()=>{if(!newEx.name)return; const ne:any={id:Date.now().toString(), name:newEx.name, muscle:newEx.muscle, type:newEx.tool, isTracked:true, defaultUnit:newEx.unit}; onUpdate({...data, exercises:[...data.exercises, ne]}); setIsAddEx(false); setExId(ne.id);}} className="w-full bg-indigo-500 text-white py-3 rounded-2xl font-black shadow-lg">建立並選取</button>
               </div>
             )}
